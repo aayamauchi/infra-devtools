@@ -8,6 +8,7 @@ else
     branch=$( git symbolic-ref --short HEAD )
 fi
 
-if [[ "${branch}" =~ infra[[:digit:]]{1,}$ ]] ; then
-    sed -i -e "1 s/^/INFRA-${branch##*infra}: /;" "${1}"
+if [[ "${branch}" =~ infra[[:digit:]]{1,} ]] ; then
+    # There may be more than one ticket number in the branch.
+    sed -i -e "1 s/^/${branch//infra/INFRA-}: /;" "${1}"
 fi
