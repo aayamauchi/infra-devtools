@@ -4,6 +4,8 @@ unset branch
 
 if [ "${2}" == merge ] ; then
     branch=$( sed -ne "1 {s/^[^']*'\([^']*\)'.*\$/\1/;p;}" "${1}" )
+    # The branch name is not needed in the message body.
+    sed -i -e "1 s/'[^']*'[[:space:]]*//" "${1}"
 else
     branch=$( git symbolic-ref --short HEAD )
 fi
