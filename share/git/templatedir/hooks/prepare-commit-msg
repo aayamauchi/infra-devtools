@@ -10,9 +10,9 @@ else
     branch=$( git symbolic-ref --short HEAD )
 fi
 
-ticket=$( echo ${branch} | sed -e 's/^\([[:alpha:]]*\)\([[:digit:]]*\)$/\U\1-\2/' )
+ticket=$( echo ${branch} | sed -e 's/\([[:alpha:]]*\)\([[:digit:]]*\)/\U\1-\2/g' )
 
-case "${ticket%-*}" in
+case "${ticket%%-*}" in
 INFRA|RELEASE)
     sed -i -e "1 s/^/${ticket}: /;" "${1}"
     ;;
