@@ -10,7 +10,14 @@ else
     branch=$( git symbolic-ref --short HEAD )
 fi
 
-if [[ "${branch}" =~ infra[[:digit:]]{1,} ]] ; then
-    # There may be more than one ticket number in the branch.
-    sed -i -e "1 s/^/${branch//infra/INFRA-}: /;" "${1}"
-fi
+ticket_type=$( echo ${branch} | sed -e 's/^\([[:alpha:]]*\).*/\U\1/' )
+
+case "${ticket_type}" in
+INFRA|RELEASE)
+    sed -i -e "1 s/^/${ticket_type}-: /;" "${1}"
+    ;;
+*)
+    sed -i -e '1 s/^/UNRECOGNIZED TICKET TYPE!/;' "${1}"
+    exit 1
+    ;;
+esac
