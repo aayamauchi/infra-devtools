@@ -2,21 +2,42 @@
 
 unset branch
 
+# Stupid BSD sed version used by Mac has no way to disable the
+# argument for -i (--inplace), so a backup file is *always*
+# made.  The file deletions after the inplace sed commands
+# are a workaround for this.
+
 if [ "${2}" == merge ] ; then
     branch=$( sed -ne "1 {s/^[^']*'\([^']*\)'.*\$/\1/;p;}" "${1}" )
     # The branch name is not needed in the message body.
-    sed -i -e "1 s/'[^']*'[[:space:]]*//" "${1}"
+    # Stupid BSD sed on Mac has no way to disable the -i argument.
+    sed -i.bak -e "1 s/'[^']*'[[:space:]]*//;" "${1}"
+    rm -f "${1}.bak" &>/dev/null || true
 else
     branch=$( git symbolic-ref --short HEAD )
+    # When rebasing, the branch look up exits with an error.
+    # Verify if this is the case and exit, if so. If not,
+    # Let things propagate so the ugly error message shows
+    # up in the user's editor session.
+    if [ ${?} -ne 0 ] ; then
+        if git branch -l | sed -ne '/^\*/ p;' | grep -q rebasing ; then
+            exit 0
+        fi
+    fi
 fi
 
-ticket=$( echo ${branch} | sed -e 's/\([[:alpha:]]*\)\([[:digit:]]*\)/\U\1-\2/g' )
+# This stupid.  It appears that the BSD sed used on Macs does not
+# support uppercase and lowercase conversions.
+#ticket=$( echo ${branch} | sed -e 's/\([[:alpha:]]*\)\([[:digit:]]*\)/\U\1-\2/g;' )
+ticket=$( echo ${branch} | tr a-z A-Z | sed -e 's/\([[:alpha:]]*\)\([[:digit:]]*\)/\1-\2/g;' )
 
 case "${ticket%%-*}" in
 INFRA|RELEASE)
-    sed -i -e "1 s/^/${ticket}: /;" "${1}"
+    sed -i.bak -e "1 s/^/${ticket}: /;" "${1}"
+    rm -f "${1}.bak" &>/dev/null || true
     ;;
 *)
     sed -i -e '1 s/^/UNRECOGNIZED TICKET TYPE!/;' "${1}"
+    rm -f "${1}.bak" &>/dev/null || true
     ;;
 esac
