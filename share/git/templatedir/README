@@ -35,7 +35,7 @@ have in either of these directories.
 A very useful setting (for vi/vim users) when using the prepare-commit-msg
 hook is the following:
 
-export EDITOR='vim +normal\ \$ -c startinsert!'
+export GIT_EDITOR='vim +normal\ \$ -c startinsert!'
 
 With this setting in the environment, git will go to the end of the first
 line of the commit message and open in edit mode.  Adding this to a
