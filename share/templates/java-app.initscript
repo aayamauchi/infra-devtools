@@ -133,7 +133,7 @@ stop() {
 
         # make this a forcible stop, by default.
         local retries=0
-        while rh_status -q && [ ${retries} -lt < ${STOP_RETRY_MAX-1} ] ; do
+        while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
             kill -9 $(< ${PID_FILE} )
             [ -z "${STOP_RETRY_MAX}" ] || ((retries++))
             sleep ${STOP_RETRY_INTERVAL}
