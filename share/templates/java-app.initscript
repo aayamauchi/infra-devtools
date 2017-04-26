@@ -71,6 +71,7 @@ if [ -z "${CLASSPATH+set}" ]; then
 fi
 
 : ${STOP_RETRY_INTERVAL:=3}
+# By default, the max number of stop retry attempts is unlimited.
 [[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
 
 START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
@@ -137,6 +138,7 @@ stop() {
             kill -9 $(< ${PID_FILE} )
             [ -z "${STOP_RETRY_MAX}" ] || ((retries++))
             sleep ${STOP_RETRY_INTERVAL}
+            ((retries+=1))
         done
 
     fi
