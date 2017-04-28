@@ -6,7 +6,6 @@
 # description: <description, split multiple lines with \
 #              a backslash>
 
-# SHIT.  REALLY?
 ### BEGIN INIT INFO
 # Provides:
 # Required-Start: $local_fs $network
@@ -40,7 +39,7 @@ fi
 : ${JAVA_BIN:=${JAVA_HOME}/bin/java}
 
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
-# options to JVM_OPTS.will override the following defatuls.
+# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS='-Xms4096m -Xmx4096m'
     JVM_OPTS+=' -XX:+UseG1GC'
@@ -54,14 +53,14 @@ fi
 : ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
 
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
-# options to JAVA_OPTS.will override the following defatuls.
+# options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dlogback.configurationFile=/opt/hsidp/conf/logback.xml
     JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
-# options to JMX_OPTS.will override the following defatuls.
+# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JMX_OPTS+set}" ] ; then
     : JMX_OPTS=
 fi
