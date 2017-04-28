@@ -22,7 +22,7 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG=${0##*/}}
+: ${PROG:=${0##*/}}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
@@ -33,11 +33,11 @@ fi
 : ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
 
 : ${PID_FILE:=/var/run/${PROG}.pid}
-: ${LOCK_FILE=/var/lock/subsys/${PROG}}
+: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
 : ${LOG_PATH:=/var/log/${PROG}}
 
 : ${JAVA_HOME:=/opt/java_home/jre}
-: ${JAVA_BIN=${JAVA_HOME}/bin/java}
+: ${JAVA_BIN:=${JAVA_HOME}/bin/java}
 
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
 # options to JVM_OPTS.will override the following defatuls.
