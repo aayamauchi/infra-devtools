@@ -42,8 +42,6 @@ fi
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS='-Xms4096m -Xmx4096m'
     JVM_OPTS+=' -XX:+UseG1GC'
-    JVM_OPTS+=' -XX:+HeapDumpOnOutOfMemoryError'
-    JVM_OPTS+=" -XX:HeapDumpPath=/media/ephemeral0/${PROG}"
     JVM_OPTS+=" -XX:OnOutOfMemoryError=${PROG_HOME}/bin/on_oom"
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
