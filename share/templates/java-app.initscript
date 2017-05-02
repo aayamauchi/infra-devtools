@@ -102,6 +102,7 @@ start() {
     cmd+="${JMX_OPTS+ }${JMX_OPTS}"
     cmd+="${JMX_ADD_OPTS+ }${JMX_ADD_OPTS}"
     cmd+="${JAVA_APP+ }${JAVA_APP}"
+    cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
 
     # Do not touch the pid file unless start is actually successful.
     local tmp_file=$( mktemp )
