@@ -20,7 +20,7 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+: ${PROG:=vertx}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
@@ -49,7 +49,8 @@ if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS+=' -XX:OnOutOfMemoryError=/opt/hsidp/bin/on_oom'
 fi
 
-: ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
+: ${JAVA_APP:=com.bodhi.vertx.base.Starter}
+: ${JAVA_APP_OPTS:='run service:bodhi-vertx-agent'}
 
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
