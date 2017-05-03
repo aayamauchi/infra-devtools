@@ -53,7 +53,9 @@ fi
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
+    JAVA_OPTS=-Dvertx.home=${PROG_HOME}
+    JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
+    JAVA_OPTS+=' -Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory'
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
