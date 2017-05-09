@@ -78,9 +78,9 @@ START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfil
 
 rh_status() {
     if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
-        status -p ${PID_FILE} ${PROG} &>/dev/null
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG} &>/dev/null
     else
-        status -p ${PID_FILE} ${PROG}
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG}
     fi
 }
 
