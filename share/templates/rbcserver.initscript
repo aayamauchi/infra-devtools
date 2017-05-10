@@ -45,8 +45,6 @@ fi
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS='-server'
     JVM_OPTS+=' -XX:+UseG1GC'
-    JVM_OPTS+=' -XX:+UseBiasedLocking'
-    JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
 fi
 
 : ${JAVA_APP:=play.core.server.ProdServerStart}
