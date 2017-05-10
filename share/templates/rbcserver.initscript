@@ -32,7 +32,7 @@ fi
 : ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
 
 : ${PID_FILE_PATH:=/var/run/${PROG}}
-: ${PID_FILE_NAME:=${PROG}.pid}
+: ${PID_FILE_NAME:=play.pid}
 : ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
 : ${LOCK_FILE:=/var/lock/subsys/${PROG}}
 : ${LOG_PATH:=/var/log/${PROG}}
