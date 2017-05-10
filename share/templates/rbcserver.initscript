@@ -1,27 +1,27 @@
 #!/bin/bash
 #
-# <daemonname> <summary>
+# rbcserver <rbcserver>
 #
 # chkconfig:   - 81 16
-# description: <description, split multiple lines with \
-#              a backslash>
+# description: RBC Platform App on Play framework
+#
 
 ### BEGIN INIT INFO
-# Provides:
+# Provides: rbcserver
 # Required-Start: $local_fs $network
 # Required-Stop: $local_fs $network
-# Should-Start:
-# Should-Stop:
+# Should-Start: 2 3 4 5
+# Should-Stop: 0 1 6
 # Default-Start: 2 3 4 5
 # Default-Stop: 0 1 6
-# Short-Description:
-# Description:
+# Short-Description: RBC Platform App on Play framework
+# Description: RBC Platform App on Play framework
 ### END INIT INFO
 
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+: ${PROG:=rbcserver}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
