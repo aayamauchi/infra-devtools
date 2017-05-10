@@ -43,12 +43,13 @@ fi
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
+    JVM_OPTS='-server'
     JVM_OPTS+=' -XX:+UseG1GC'
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
 fi
 
-: ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
+: ${JAVA_APP:=play.core.server.ProdServerStart}
 
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
@@ -64,7 +65,7 @@ if [ -z "${JMX_OPTS+set}" ] ; then
 fi
 
 if [ -z "${CLASSPATH+set}" ]; then
-    CLASSPATH=${PROG_HOME}/conf:${PROG_HOME}/lib/*
+    CLASSPATH=${PROG_HOME}/lib/*
 fi
 
 : ${STOP_RETRY_INTERVAL:=3}
