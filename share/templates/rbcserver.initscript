@@ -52,8 +52,7 @@ fi
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dlogback.configurationFile=/opt/hsidp/conf/logback.xml
-    JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
+    JAVA_OPTS=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
@@ -66,13 +65,13 @@ if [ -z "${CLASSPATH+set}" ]; then
     CLASSPATH=${PROG_HOME}/lib/*
 fi
 
-: ${STOP_RETRY_INTERVAL:=3}
+: ${STOP_RETRY_INTERVAL:=1}
 # By default, the max number of stop retry attempts is unlimited.
 [[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
 
 START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
 
-: ${ULIMIT_OPTS:='-n 65536'}
+: ${ULIMIT_OPTS:='-n 16384'}
 
 rh_status() {
     if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
