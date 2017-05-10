@@ -94,7 +94,7 @@ start() {
     export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
 
     local cmd="${JAVA_BIN}"
-    cmd+="${CLASSPATH+ -classpath }${CLASSPATH}"
+    cmd+="${CLASSPATH+ -classpath '${CLASSPATH}'}"
     cmd+="${JVM_OPTS+ }${JVM_OPTS}"
     cmd+="${JVM_ADD_OPTS+ }${JVM_ADD_OPTS}"
     cmd+="${JAVA_OPTS+ }${JAVA_OPTS}"
