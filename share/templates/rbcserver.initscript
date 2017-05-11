@@ -70,8 +70,12 @@ if [ -z "${CLASSPATH+set}" ]; then
 fi
 
 : ${STOP_RETRY_INTERVAL:=1}
-# By default, the max number of stop retry attempts is unlimited.
-[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+# By default, the max number of stop retry attempts is 10, as in the previous initscript version.
+if [ -z "${STOP_RETRY_MAX+set}" ] ; then
+    STOP_RETRY_MAX=10
+elif [ -z "${STOP_RETRY_MAX}" ] ; then
+    unset STOP_RETRY_MAX
+fi
 
 START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
 
