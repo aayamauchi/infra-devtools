@@ -29,7 +29,9 @@ fi
 
 : ${PROG_USER:=${PROG}}
 : ${PROG_GROUP:=${PROG_USER}}
-: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+# The rbcserver user home is not the installation path.  WHY‽
+#: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+: ${PROG_HOME:=/opt/rbcserver}
 
 : ${PID_FILE_PATH:=/var/run/${PROG}}
 : ${PID_FILE_NAME:=play.pid}
@@ -53,8 +55,8 @@ fi
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dconfig.file=${PROG_HOME}/conf/application.conf
-    JAVA_OPTS+=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
-    JAVA_OPTS+=-Dpidfile.path=${PID_FILE}
+    JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
+    JAVA_OPTS+=" -Dpidfile.path=${PID_FILE}"
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
@@ -64,7 +66,7 @@ if [ -z "${JMX_OPTS+set}" ] ; then
 fi
 
 if [ -z "${CLASSPATH+set}" ]; then
-    CLASSPATH=${PROG_HOME}/lib/*
+    CLASSPATH="${PROG_HOME}/lib/*"
 fi
 
 : ${STOP_RETRY_INTERVAL:=1}
@@ -110,7 +112,7 @@ start() {
 
     sleep ${STOP_RETRY_INTERVAL}
 
-    if status -q ; then
+    if rh_status -q ; then
         touch ${LOCK_FILE}
         return 0
     else
