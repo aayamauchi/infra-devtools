@@ -1,0 +1,210 @@
+#!/bin/bash
+#
+# rbcserver <rbcserver>
+#
+# chkconfig:   - 81 16
+# description: RBC Platform App on Play framework
+#
+
+### BEGIN INIT INFO
+# Provides: rbcserver
+# Required-Start: $local_fs $network
+# Required-Stop: $local_fs $network
+# Should-Start: 2 3 4 5
+# Should-Stop: 0 1 6
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: RBC Platform App on Play framework
+# Description: RBC Platform App on Play framework
+### END INIT INFO
+
+source /etc/init.d/functions
+source /lib/lsb/init-functions
+
+: ${PROG:=rbcserver}
+
+if [ -r /etc/sysconfig/${PROG} ] ; then
+    source /etc/sysconfig/${PROG}
+fi
+
+: ${PROG_USER:=${PROG}}
+: ${PROG_GROUP:=${PROG_USER}}
+# The rbcserver user home is not the installation path.  WHY‽
+#: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+: ${PROG_HOME:=/opt/rbcserver}
+
+: ${PID_FILE_PATH:=/var/run/${PROG}}
+: ${PID_FILE_NAME:=play.pid}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
+: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
+: ${LOG_PATH:=/var/log/${PROG}}
+
+: ${JAVA_HOME:=/opt/java_home/jre}
+: ${JAVA_BIN:=${JAVA_HOME}/bin/java}
+
+# Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
+# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
+if [ -z "${JVM_OPTS+set}" ] ; then
+    JVM_OPTS='-server'
+    JVM_OPTS+=' -XX:+UseG1GC'
+fi
+
+: ${JAVA_APP:=play.core.server.ProdServerStart}
+
+# Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
+# options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
+if [ -z "${JAVA_OPTS+set}" ] ; then
+    JAVA_OPTS=-Dconfig.file=${PROG_HOME}/conf/application.conf
+    JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
+    JAVA_OPTS+=" -Dpidfile.path=${PID_FILE}"
+fi
+
+# Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
+# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
+if [ -z "${JMX_OPTS+set}" ] ; then
+    : JMX_OPTS=
+fi
+
+if [ -z "${CLASSPATH+set}" ]; then
+    CLASSPATH="${PROG_HOME}/lib/*"
+fi
+
+: ${STOP_RETRY_INTERVAL:=1}
+# By default, the max number of stop retry attempts is 10, as in the previous initscript version.
+if [ -z "${STOP_RETRY_MAX+set}" ] ; then
+    STOP_RETRY_MAX=10
+elif [ -z "${STOP_RETRY_MAX}" ] ; then
+    unset STOP_RETRY_MAX
+fi
+
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
+
+: ${ULIMIT_OPTS:='-n 16384'}
+
+rh_status() {
+    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG} &>/dev/null
+    else
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG}
+    fi
+}
+
+start() {
+
+    [ $( id -u ) -eq 0 ] || return 4
+    [ -x ${JAVA_BIN} ] || return 5
+
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
+
+    local cmd="${JAVA_BIN}"
+    cmd+="${CLASSPATH+ -classpath '${CLASSPATH}'}"
+    cmd+="${JVM_OPTS+ }${JVM_OPTS}"
+    cmd+="${JVM_ADD_OPTS+ }${JVM_ADD_OPTS}"
+    cmd+="${JAVA_OPTS+ }${JAVA_OPTS}"
+    cmd+="${JAVA_ADD_OPTS+ }${JAVA_ADD_OPTS}"
+    cmd+="${JMX_OPTS+ }${JMX_OPTS}"
+    cmd+="${JMX_ADD_OPTS+ }${JMX_ADD_OPTS}"
+    cmd+="${JAVA_APP+ }${JAVA_APP}"
+    cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
+    cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
+
+    cd ${PROG_HOME}
+
+    daemon ${START_STOP_DAEMON_ARGS} "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err &"
+
+    sleep ${STOP_RETRY_INTERVAL}
+
+    if rh_status -q ; then
+        touch ${LOCK_FILE}
+        return 0
+    else
+        rm -f ${PID_FILE}
+        return 1
+    fi
+}
+
+stop() {
+
+    if rh_status -q ; then
+
+        [ $( id -u ) -eq 0 ] || return 4
+
+        killproc -p ${PID_FILE} || true
+        sleep ${STOP_RETRY_INTERVAL}
+
+        # make this a forcible stop, by default.
+        local retries=0
+        while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
+            kill -9 $(< ${PID_FILE} )
+            [ -z "${STOP_RETRY_MAX}" ] || ((retries++))
+            sleep ${STOP_RETRY_INTERVAL}
+            ((retries+=1))
+        done
+
+    fi
+
+    local process_state=0
+    rh_status -q || process_state=${?}
+    if [ ${process_state} -lt 4 ] ; then
+        rm -f ${LOCK_FILE} ${PID_FILE}
+        return 0
+    else
+        return 1
+    fi
+}
+
+exit_val=0
+case "${1}" in
+    start)
+        echo -n $"Starting ${PROG}: "
+        start || exit_val=${?}
+        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        ;;
+    stop)
+        echo -n $"Stopping ${PROG}: "
+        stop || exit_val=${?}
+        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        ;;
+    restart|reload|force-reload)
+        echo -n $"Stopping ${PROG}: "
+        if [ "$( type -t ${1/-/_} )" == function ] ; then
+            ${1/-/_} || exit=${?}
+            [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        else
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                log_success_msg
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+            else
+                log_failure_msg
+            fi
+        fi
+        ;;
+    status)
+        rh_status || exit_val=${?}
+        ;;
+    try-restart|condrestart)
+        if rh_status -q ; then
+            echo -n $"Stopping ${PROG}: "
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                log_success_msg
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+            else
+                log_failure_msg
+            fi
+        fi
+        ;;
+    *)
+        echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
+        exit_val=2
+        ;;
+esac
+
+exit ${exit_val}
