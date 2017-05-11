@@ -41,13 +41,9 @@ fi
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
-    JVM_OPTS='-Xms4096m -Xmx4096m'
     JVM_OPTS+=' -XX:+UseG1GC'
-    JVM_OPTS+=' -XX:+HeapDumpOnOutOfMemoryError'
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
-    JVM_OPTS+=' -XX:HeapDumpPath=/media/ephemeral0/hsidp'
-    JVM_OPTS+=' -XX:OnOutOfMemoryError=/opt/hsidp/bin/on_oom'
 fi
 
 : ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
