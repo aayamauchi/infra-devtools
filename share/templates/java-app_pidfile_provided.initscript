@@ -43,7 +43,7 @@ fi
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
-    JVM_OPTS+=' -XX:+UseG1GC'
+    JVM_OPTS='-XX:+UseG1GC'
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
 fi
