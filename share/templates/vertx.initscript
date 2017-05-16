@@ -137,9 +137,8 @@ stop() {
         local retries=0
         while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
             kill -9 $(< ${PID_FILE} )
-            [ -z "${STOP_RETRY_MAX}" ] || ((retries++))
+            [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
             sleep ${STOP_RETRY_INTERVAL}
-            ((retries+=1))
         done
 
     fi
@@ -169,7 +168,7 @@ case "${1}" in
     restart|reload|force-reload)
         echo -n $"Stopping ${PROG}: "
         if [ "$( type -t ${1/-/_} )" == function ] ; then
-            ${1/-/_} || exit=${?}
+            ${1/-/_} || exit_val=${?}
             [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         else
             stop || exit_val=${?}
