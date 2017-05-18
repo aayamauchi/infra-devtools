@@ -83,7 +83,7 @@ rh_status() {
 
 start() {
 
-    [ $( id -u ) -eq 0 ] || return 
+    [ ${UID} -eq 0 ] || return 
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
@@ -112,7 +112,7 @@ stop() {
 
     if rh_status -q ; then
 
-        [ $( id -u ) -eq 0 ] || return 4
+        [ ${UID} -eq 0 ] || return 4
 
         killproc -p ${PID_FILE} || true
         sleep ${STOP_RETRY_INTERVAL}
