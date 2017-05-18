@@ -69,7 +69,7 @@ if [ -z "${CLASSPATH+set}" ]; then
     CLASSPATH="${PROG_HOME}/lib/*"
 fi
 
-: ${STOP_RETRY_INTERVAL:=1}
+: ${STOP_RETRY_INTERVAL:=20}
 # By default, the max number of stop retry attempts is 10, as in the previous initscript version.
 if [ -z "${STOP_RETRY_MAX+set}" ] ; then
     STOP_RETRY_MAX=10
