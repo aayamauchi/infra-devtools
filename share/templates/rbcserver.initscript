@@ -91,7 +91,11 @@ rh_status() {
 
 start() {
 
-    [ ${UID} -eq 0 ] || return 4
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg 'superuser priveleges are required for this action'
+        return 4
+    fi
+
     [ -x ${JAVA_BIN} ] || return 5
 
     ulimit ${ULIMIT_OPTS} &>/dev/null || true
@@ -118,9 +122,11 @@ start() {
 
     if rh_status -q ; then
         touch ${LOCK_FILE}
+        log_success_msg
         return 0
     else
         rm -f ${PID_FILE}
+        log_failure_msg "unable to start ${PROG}"
         return 1
     fi
 }
@@ -128,6 +134,10 @@ start() {
 stop() {
 
     local process_state=0
+    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+        exec &>/dev/null
+        shift
+    fi
 
     [ ${UID} -eq 0 ] || return 4
 
@@ -136,8 +146,10 @@ stop() {
     if [ ${process_state} -gt 0 ] ; then
         if [ ${process_state} -lt 4 ] ; then
             rm -f ${PID_FILE} ${LOCK_FILE}
+            log_success_msg
             return 0
         else
+            log_failure_msg "process ${PROG} is in an unknown state (${process_state})"
             return 1
         fi
     fi
@@ -156,8 +168,10 @@ stop() {
     rh_status -q || process_state=${?}
     if [ ${process_state} -lt 4 ] ; then
         rm -f ${LOCK_FILE} ${PID_FILE}
+        log_success_msg
         return 0
     else
+        log_failure_msg "unable to stop ${PROG} after ${STOP_RETRY_MAX} attempts"
         return 1
     fi
 }
@@ -167,27 +181,20 @@ case "${1}" in
     start)
         echo -n $"Starting ${PROG}: "
         start || exit_val=${?}
-        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         ;;
     stop)
         echo -n $"Stopping ${PROG}: "
         stop || exit_val=${?}
-        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         ;;
     restart|reload|force-reload)
         echo -n $"Stopping ${PROG}: "
         if [ "$( type -t ${1/-/_} )" == function ] ; then
             ${1/-/_} || exit_val=${?}
-            [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         else
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
-                log_success_msg
                 echo -n $"Starting ${PROG}: "
                 start || exit_val=${?}
-                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
-            else
-                log_failure_msg
             fi
         fi
         ;;
@@ -199,13 +206,11 @@ case "${1}" in
             echo -n $"Stopping ${PROG}: "
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
-                log_success_msg
                 echo -n $"Starting ${PROG}: "
                 start || exit_val=${?}
-                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
-            else
-                log_failure_msg
             fi
+        else
+            log_success_msg "process ${PROG} is not running"
         fi
         ;;
     *)
