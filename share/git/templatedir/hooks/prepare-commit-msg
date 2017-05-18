@@ -32,7 +32,7 @@ fi
 ticket=$( echo ${branch} | tr a-z A-Z | sed -e 's/\([[:alpha:]]*\)\([[:digit:]]*\)/\1-\2/g;' )
 
 case "${ticket%%-*}" in
-INFRA|RELEASE)
+INFRA|RELEASE|BD)
     sed -i.bak -e "1 s/^/${ticket}: /;" "${1}"
     rm -f "${1}.bak" &>/dev/null || true
     ;;
