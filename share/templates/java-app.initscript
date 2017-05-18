@@ -110,24 +110,32 @@ start() {
 
 stop() {
 
-    if rh_status -q ; then
+    local process_state=0
 
-        [ ${UID} -eq 0 ] || return 4
+    [ ${UID} -eq 0 ] || return 4
 
-        killproc -p ${PID_FILE} || true
-        sleep ${STOP_RETRY_INTERVAL}
+    rh_status -q || process_state=${?}
 
-        # make this a forcible stop, by default.
-        local retries=0
-        while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
-            kill -9 $(< ${PID_FILE} )
-            [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
-            sleep ${STOP_RETRY_INTERVAL}
-        done
-
+    if [ ${process_state} -gt 0 ] ; then
+        if [ ${process_state} -lt 4 ] ; then
+            rm -f ${PID_FILE} ${LOCK_FILE}
+            return 0
+        else
+            return 1
+        fi
     fi
 
-    local process_state=0
+    killproc -p ${PID_FILE} || true
+    sleep ${STOP_RETRY_INTERVAL}
+
+    # make this a forcible stop, by default.
+    local retries=0
+    while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
+        kill -9 $(< ${PID_FILE} )
+        [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
+        sleep ${STOP_RETRY_INTERVAL}
+    done
+
     rh_status -q || process_state=${?}
     if [ ${process_state} -lt 4 ] ; then
         rm -f ${LOCK_FILE} ${PID_FILE}
