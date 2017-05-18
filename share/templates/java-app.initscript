@@ -84,8 +84,13 @@ rh_status() {
 start() {
 
     if [ ${UID} -ne 0 ] ; then
-        log_failure_msg 'superuser priveleges are required for this action'
+        log_failure_msg superuser privileges are required
         return 4
+    fi
+
+    if [ ! -x ${JAVA_BIN} ] ; then
+        log_failure_msg ${JAVA_BIN} not $( [ -f ${JAVA_BIN} ] && echo executable || echo found )
+        return 5
     fi
 
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
@@ -109,7 +114,7 @@ start() {
         return 0
     else
         rm -f ${tmp_file}
-        log_failure_msg "unable to start ${PROG}"
+        log_failure_msg unable to start ${PROG}
         return 1
     fi
 }
@@ -122,7 +127,10 @@ stop() {
         shift
     fi
 
-    [ ${UID} -eq 0 ] || return 4
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
 
     rh_status -q || process_state=${?}
 
@@ -132,7 +140,7 @@ stop() {
             log_success_msg
             return 0
         else
-            log_failure_msg "process ${PROG} is in an unknown state (${process_state})"
+            log_failure_msg process ${PROG} in unknown state
             return 1
         fi
     fi
@@ -154,7 +162,7 @@ stop() {
         log_success_msg
         return 0
     else
-        log_failure_msg "unable to stop ${PROG} after ${STOP_RETRY_MAX} attempts"
+        log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
         return 1
     fi
 }
@@ -193,7 +201,7 @@ case "${1}" in
                 start || exit_val=${?}
             fi
         else
-            log_success_msg "process ${PROG} is not running"
+            log_success_msg process ${PROG} is not running
         fi
         ;;
     *)
