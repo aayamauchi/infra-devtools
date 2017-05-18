@@ -83,7 +83,7 @@ rh_status() {
 
 start() {
 
-    [ ${UID} -eq 0 ] || return 
+    [ ${UID} -eq 0 ] || return 4
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
