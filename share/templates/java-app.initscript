@@ -83,7 +83,11 @@ rh_status() {
 
 start() {
 
-    [ $( id -u ) -eq 0 ] || return 
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg 'superuser priveleges are required for this action'
+        return 4
+    fi
+
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
@@ -101,38 +105,56 @@ start() {
         mv ${tmp_file} ${PID_FILE}
         chmod a+r ${PID_FILE}
         touch ${LOCK_FILE}
+        log_success_msg
         return 0
     else
         rm -f ${tmp_file}
+        log_failure_msg "unable to start ${PROG}"
         return 1
     fi
 }
 
 stop() {
 
-    if rh_status -q ; then
-
-        [ $( id -u ) -eq 0 ] || return 4
-
-        killproc -p ${PID_FILE} || true
-        sleep ${STOP_RETRY_INTERVAL}
-
-        # make this a forcible stop, by default.
-        local retries=0
-        while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
-            kill -9 $(< ${PID_FILE} )
-            [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
-            sleep ${STOP_RETRY_INTERVAL}
-        done
-
+    local process_state=0
+    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+        exec &>/dev/null
+        shift
     fi
 
-    local process_state=0
+    [ ${UID} -eq 0 ] || return 4
+
+    rh_status -q || process_state=${?}
+
+    if [ ${process_state} -gt 0 ] ; then
+        if [ ${process_state} -lt 4 ] ; then
+            rm -f ${PID_FILE} ${LOCK_FILE}
+            log_success_msg
+            return 0
+        else
+            log_failure_msg "process ${PROG} is in an unknown state (${process_state})"
+            return 1
+        fi
+    fi
+
+    killproc -p ${PID_FILE} || true
+    sleep ${STOP_RETRY_INTERVAL}
+
+    # make this a forcible stop, by default.
+    local retries=0
+    while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
+        kill -9 $(< ${PID_FILE} )
+        [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
+        sleep ${STOP_RETRY_INTERVAL}
+    done
+
     rh_status -q || process_state=${?}
     if [ ${process_state} -lt 4 ] ; then
         rm -f ${LOCK_FILE} ${PID_FILE}
+        log_success_msg
         return 0
     else
+        log_failure_msg "unable to stop ${PROG} after ${STOP_RETRY_MAX} attempts"
         return 1
     fi
 }
@@ -142,27 +164,20 @@ case "${1}" in
     start)
         echo -n $"Starting ${PROG}: "
         start || exit_val=${?}
-        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         ;;
     stop)
         echo -n $"Stopping ${PROG}: "
         stop || exit_val=${?}
-        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         ;;
     restart|reload|force-reload)
         echo -n $"Stopping ${PROG}: "
         if [ "$( type -t ${1/-/_} )" == function ] ; then
             ${1/-/_} || exit_val=${?}
-            [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
         else
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
-                log_success_msg
                 echo -n $"Starting ${PROG}: "
                 start || exit_val=${?}
-                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
-            else
-                log_failure_msg
             fi
         fi
         ;;
@@ -174,13 +189,11 @@ case "${1}" in
             echo -n $"Stopping ${PROG}: "
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
-                log_success_msg
                 echo -n $"Starting ${PROG}: "
                 start || exit_val=${?}
-                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
-            else
-                log_failure_msg
             fi
+        else
+            log_success_msg "process ${PROG} is not running"
         fi
         ;;
     *)
