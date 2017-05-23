@@ -52,8 +52,8 @@ fi
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dlogback.configurationFile=/opt/authproxy/conf/logback.xml
-    JAVA_OPTS+=" -Dplay.evolutions.db.default.autoApply=true "
+    JAVA_OPTS=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
+    JAVA_OPTS+=' -Dplay.evolutions.db.default.autoApply=true'
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
