@@ -31,7 +31,9 @@ fi
 : ${PROG_GROUP:=${PROG_USER}}
 : ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
 
-: ${PID_FILE:=/var/run/${PROG}.pid}
+: ${PID_FILE_PATH:=/var/run/${PROG}}
+: ${PID_FILE_NAME:=${PROG}.pid}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
 : ${LOCK_FILE:=/var/lock/subsys/${PROG}}
 : ${LOG_PATH:=/var/log/${PROG}}
 
@@ -52,7 +54,8 @@ fi
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
+    JAVA_OPTS=-Dpidfile.path=${PID_FILE}
+    JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
     JAVA_OPTS+=' -Dplay.evolutions.db.default.autoApply=true'
 fi
 
@@ -94,7 +97,6 @@ start() {
         return 5
     fi
 
-
     ulimit ${ULIMIT_OPTS} &>/dev/null || true
 
     export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
@@ -111,24 +113,18 @@ start() {
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
-    # Do not touch the pid file unless start is actually successful.
-    local tmp_file=$( mktemp )
-    chown ${PROG_USER}:${PROG_GROUP} ${tmp_file}
-
     cd ${PROG_HOME}
 
-    daemon ${START_STOP_DAEMON_ARGS} "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err & echo \${!} 1>>${tmp_file}"
+    daemon ${START_STOP_DAEMON_ARGS} "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err &"
 
     sleep ${STOP_RETRY_INTERVAL}
 
-    if ps -p "$(< ${tmp_file} )" &>/dev/null ; then
-        mv ${tmp_file} ${PID_FILE}
-        chmod a+r ${PID_FILE}
+    if status -q ; then
         touch ${LOCK_FILE}
         log_success_msg
         return 0
     else
-        rm -f ${tmp_file}
+        rm -f ${PID_FILE}
         log_failure_msg unable to start ${PROG}
         return 1
     fi
