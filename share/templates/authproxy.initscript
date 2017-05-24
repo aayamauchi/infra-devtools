@@ -21,7 +21,7 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+: ${PROG:=authproxy}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
@@ -43,19 +43,20 @@ fi
 # Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
-    JVM_OPTS='-XX:+UseG1GC'
+    JVM_OPTS='-server'
+    JVM_OPTS+=' -XX:+UseG1GC'
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
 fi
 
-: ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
+: ${JAVA_APP:=play.core.server.ProdServerStart}
 
 # Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dpidfile.path=${PID_FILE}
     JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
-    JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
+    JAVA_OPTS+=' -Dplay.evolutions.db.default.autoApply=true'
 fi
 
 # Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
@@ -190,7 +191,7 @@ case "${1}" in
     restart|reload|force-reload)
         echo -n $"Stopping ${PROG}: "
         if [ "$( type -t ${1/-/_} )" == function ] ; then
-            ${1/-/_} || exit_val=${?}
+            ${1/-/_} || exit=${?}
         else
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
