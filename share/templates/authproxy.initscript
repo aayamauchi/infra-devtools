@@ -21,7 +21,7 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+: ${PROG:=authproxy}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
@@ -119,7 +119,7 @@ start() {
 
     sleep ${STOP_RETRY_INTERVAL}
 
-    if status -q ; then
+    if rh_status -q ; then
         touch ${LOCK_FILE}
         log_success_msg
         return 0
