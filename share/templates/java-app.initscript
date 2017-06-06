@@ -92,7 +92,8 @@ start() {
         log_failure_msg ${JAVA_BIN} not $( [ -f ${JAVA_BIN} ] && echo executable || echo found )
         return 5
     fi
-
+    
+    local cmd="${JAVA_BIN}"
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
