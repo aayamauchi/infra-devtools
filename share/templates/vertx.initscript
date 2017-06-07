@@ -94,6 +94,19 @@ start() {
         return 5
     fi
 
+    local current_state=0
+    rh_status -q || current_state=${?}
+    case "${current_state}" in
+        0)
+            log_success_msg "${PROG} is already running"
+            return 0
+        ;;
+        [12])
+            # Try clearing pid and lock files and hope for the best.
+            rm -f ${PID_FILE} ${LOCK_FILE}
+        ;;
+    esac
+
     ulimit ${ULIMIT_OPTS} &>/dev/null || true
 
     export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
