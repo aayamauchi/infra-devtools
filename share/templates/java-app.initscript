@@ -38,7 +38,7 @@ fi
 : ${JAVA_HOME:=/opt/java_home/jre}
 : ${JAVA_BIN:=${JAVA_HOME}/bin/java}
 
-# Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JVM_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS+=' -XX:+UseG1GC'
@@ -48,14 +48,14 @@ fi
 
 : ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
 
-# Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JAVA_ADD_OPTS variable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dlogback.configurationFile=/opt/hsidp/conf/logback.xml
     JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
 fi
 
-# Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JMX_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JMX_OPTS+set}" ] ; then
     : JMX_OPTS=

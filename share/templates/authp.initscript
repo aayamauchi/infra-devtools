@@ -40,7 +40,7 @@ fi
 : ${JAVA_HOME:=/opt/java_home/jre}
 : ${JAVA_BIN:=${JAVA_HOME}/bin/java}
 
-# Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JVM_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS='-server'
@@ -51,7 +51,7 @@ fi
 
 : ${JAVA_APP:=play.core.server.ProdServerStart}
 
-# Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JAVA_ADD_OPTS variable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dpidfile.path=${PID_FILE}
@@ -59,7 +59,7 @@ if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS+=' -Dplay.evolutions.db.default.autoApply=true'
 fi
 
-# Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JMX_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JMX_OPTS+set}" ] ; then
     : JMX_OPTS=

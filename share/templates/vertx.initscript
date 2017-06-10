@@ -37,7 +37,7 @@ fi
 : ${JAVA_HOME:=/opt/java_home/jre}
 : ${JAVA_BIN:=${JAVA_HOME}/bin/java}
 
-# Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JVM_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
     JVM_OPTS+=' -XX:+UseG1GC'
@@ -48,7 +48,7 @@ fi
 : ${JAVA_APP:=com.bodhi.vertx.base.Starter}
 : ${JAVA_APP_OPTS:='run service:bodhi-vertx-agent'}
 
-# Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JAVA_ADD_OPTS variable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS=-Dvertx.home=${PROG_HOME}
@@ -56,7 +56,7 @@ if [ -z "${JAVA_OPTS+set}" ] ; then
     JAVA_OPTS+=' -Dvertx.logger-delegate-factory-class-name=io.vertx.core.logging.SLF4JLogDelegateFactory'
 fi
 
-# Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
+# Setting a JMX_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JMX_OPTS+set}" ] ; then
     : JMX_OPTS=
