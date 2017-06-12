@@ -1,0 +1,206 @@
+#!/bin/bash
+#
+# <daemonname> <summary>
+#
+# chkconfig:   - 81 16
+# description: <description, split multiple lines with \
+#              a backslash>
+
+# SHIT.  REALLY?
+### BEGIN INIT INFO
+# Provides:
+# Required-Start: $local_fs $network
+# Required-Stop: $local_fs $network
+# Should-Start:
+# Should-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description:
+# Description:
+### END INIT INFO
+
+source /etc/init.d/functions
+source /lib/lsb/init-functions
+
+: ${PROG=${0##*/}}
+
+if [ -r /etc/sysconfig/${PROG} ] ; then
+    source /etc/sysconfig/${PROG}
+fi
+
+: ${PROG_USER:=${PROG}}
+: ${PROG_GROUP:=${PROG_USER}}
+: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+
+: ${PID_FILE:=/var/run/${PROG}.pid}
+: ${LOCK_FILE=/var/lock/subsys/${PROG}}
+: ${LOG_PATH:=/var/log/${PROG}}
+
+: ${JAVA_HOME:=/opt/java_home/jre}
+: ${JAVA_BIN=${JAVA_HOME}/bin/java}
+
+# Setting a JVM_ADD_OPTS veriable in the sysconfig file will append
+# options to JVM_OPTS.will override the following defatuls.
+if [ -z "${JVM_OPTS+set}" ] ; then
+    JVM_OPTS='-Xms4096m -Xmx4096m'
+    JVM_OPTS+=' -XX:+UseG1GC'
+    JVM_OPTS+=' -XX:+HeapDumpOnOutOfMemoryError'
+    JVM_OPTS+=' -XX:+UseBiasedLocking'
+    JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
+    JVM_OPTS+=' -XX:HeapDumpPath=/media/ephemeral0/hsidp'
+    JVM_OPTS+=' -XX:OnOutOfMemoryError=/opt/hsidp/bin/on_oom'
+fi
+
+: ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
+
+# Setting a JAVA_ADD_OPTS veriable in the sysconfig file will append
+# options to JAVA_OPTS.will override the following defatuls.
+if [ -z "${JAVA_OPTS+set}" ] ; then
+    JAVA_OPTS=-Dlogback.configurationFile=/opt/hsidp/conf/logback.xml
+    JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
+fi
+
+# Setting a JMX_ADD_OPTS veriable in the sysconfig file will append
+# options to JMX_OPTS.will override the following defatuls.
+if [ -z "${JMX_OPTS+set}" ] ; then
+    : JMX_OPTS=
+fi
+
+if [ -z "${CLASSPATH+set}" ]; then
+    CLASSPATH=${PROG_HOME}/conf:${PROG_HOME}/lib/*
+fi
+
+: ${STOP_RETRY_INTERVAL:=3}
+[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
+
+: ${ULIMIT_OPTS:='-n 65536'}
+
+rh_status() {
+    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+        status -p ${PID_FILE} ${PROG} &>/dev/null
+    else
+        status -p ${PID_FILE} ${PROG}
+    fi
+}
+
+start() {
+
+    [ -x ${JAVA_BIN} ] || return 5
+
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
+
+    local cmd="${JAVA_BIN}"
+    cmd+="${CLASSPATH+ -classpath }${CLASSPATH}"
+    cmd+="${JVM_OPTS+ }${JVM_OPTS}"
+    cmd+="${JVM_ADD_OPTS+ }${JVM_ADD_OPTS}"
+    cmd+="${JAVA_OPTS+ }${JAVA_OPTS}"
+    cmd+="${JAVA_ADD_OPTS+ }${JAVA_ADD_OPTS}"
+    cmd+="${JMX_OPTS+ }${JMX_OPTS}"
+    cmd+="${JMX_ADD_OPTS+ }${JMX_ADD_OPTS}"
+    cmd+="${JAVA_APP+ }${JAVA_APP}"
+
+    # Do not touch the pid file unless start is actually successful.
+    local tmp_file=$( mktemp )
+    chown ${PROG_USER}:${PROG_GROUP} ${tmp_file}
+
+    cd ${PROG_HOME}
+
+    daemon ${START_STOP_DAEMON_ARGS} "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err & echo \${!} 1>>${tmp_file}"
+
+    sleep ${STOP_RETRY_INTERVAL}
+
+    if ps -p "$(< ${tmp_file} )" &>/dev/null ; then
+        mv ${tmp_file} ${PID_FILE}
+        chmod a+r ${PID_FILE}
+        touch ${LOCK_FILE}
+        return 0
+    else
+        rm -f ${tmp_file}
+        return 1
+    fi
+}
+
+stop() {
+
+    if rh_status -q ; then
+
+        killproc -p ${PID_FILE} || true
+        sleep ${STOP_RETRY_INTERVAL}
+
+        # make this a forcible stop, by default.
+        local retries=0
+        while rh_status -q && [ ${retries} -lt < ${STOP_RETRY_MAX-1} ] ; do
+            kill -9 $(< ${PID_FILE} )
+            [ -z "${STOP_RETRY_MAX}" ] || ((retries++))
+            sleep ${STOP_RETRY_INTERVAL}
+        done
+
+    fi
+
+    local process_state=0
+    rh_status -q || process_state=${?}
+    if [ ${process_state} -lt 4 ] ; then
+        rm -f ${LOCK_FILE} ${PID_FILE}
+        return 0
+    else
+        return 1
+    fi
+}
+
+exit_val=0
+case "${1}" in
+    start)
+        echo -n $"Starting ${PROG}: "
+        start || exit_val=${?}
+        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        ;;
+    stop)
+        echo -n $"Stopping ${PROG}: "
+        stop || exit_val=${?}
+        [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        ;;
+    restart|reload|force-reload)
+        echo -n $"Stopping ${PROG}: "
+        if [ "$( type -t ${1/-/_} )" == function ] ; then
+            ${1/-/_} || exit=${?}
+            [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+        else
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                log_success_msg
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+            else
+                log_failure_msg
+            fi
+        fi
+        ;;
+    status)
+        rh_status || exit_val=${?}
+        ;;
+    try-restart|condrestart)
+        if rh_status -q ; then
+            echo -n $"Stopping ${PROG}: "
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                log_success_msg
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+                [ ${exit_val} -eq 0 ] && log_success_msg || log_failure_msg
+            else
+                log_failure_msg
+            fi
+        fi
+        ;;
+    *)
+        echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
+        exit_val=2
+        ;;
+esac
+
+exit ${exit_val}
