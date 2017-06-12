@@ -185,7 +185,6 @@ case "${1}" in
         ;;
     try-restart|condrestart)
         if rh_status -q ; then
-            echo -n $"Stopping ${PROG}: "
             stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
                 log_success_msg
@@ -200,7 +199,6 @@ case "${1}" in
     *)
         echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
         exit_val=2
-        ;;
 esac
 
 exit ${exit_val}
