@@ -41,7 +41,7 @@ fi
 # Setting a JVM_ADD_OPTS variable in the sysconfig file will append
 # options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
 if [ -z "${JVM_OPTS+set}" ] ; then
-    JVM_OPTS+=' -XX:+UseG1GC'
+    JVM_OPTS='-XX:+UseG1GC'
     JVM_OPTS+=' -XX:+UseBiasedLocking'
     JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
 fi
@@ -106,7 +106,19 @@ start() {
         ;;
     esac
     
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
+
     local cmd="${JAVA_BIN}"
+    cmd+="${CLASSPATH+ -classpath '${CLASSPATH}'}"
+    cmd+="${JVM_OPTS+ }${JVM_OPTS}"
+    cmd+="${JVM_ADD_OPTS+ }${JVM_ADD_OPTS}"
+    cmd+="${JAVA_OPTS+ }${JAVA_OPTS}"
+    cmd+="${JAVA_ADD_OPTS+ }${JAVA_ADD_OPTS}"
+    cmd+="${JMX_OPTS+ }${JMX_OPTS}"
+    cmd+="${JMX_ADD_OPTS+ }${JMX_ADD_OPTS}"
+    cmd+="${JAVA_APP+ }${JAVA_APP}"
     cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
     cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
 
