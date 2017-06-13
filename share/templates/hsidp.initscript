@@ -21,7 +21,7 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+: ${PROG:=hsidp}
 
 if [ -r /etc/sysconfig/${PROG} ] ; then
     source /etc/sysconfig/${PROG}
@@ -51,8 +51,7 @@ fi
 # Setting a JAVA_ADD_OPTS variable in the sysconfig file will append
 # options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
 if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dlogback.configurationFile=/opt/hsidp/conf/logback.xml
-    JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
+    JAVA_OPTS=-Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml
 fi
 
 # Setting a JMX_ADD_OPTS variable in the sysconfig file will append
