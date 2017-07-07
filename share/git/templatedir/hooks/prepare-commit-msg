@@ -14,7 +14,13 @@ if [ "${2}" == merge ] ; then
     sed -i.bak -e "1 s/'[^']*'[[:space:]]*//;" "${1}"
     rm -f "${1}.bak" &>/dev/null || true
 else
-    branch=$( git symbolic-ref --short HEAD )
+    # The 1.7.1 version used by EL6 does not have a '--short' option
+    # for the 'symbolic-ref' subcommand.
+    if [ $( git --version | sed -e 's/^.*[[:space:]]\([[:digit:]]\{1,\}\).*$/\1/;' ) -ge 2 ] ; then
+        branch=$( git symbolic-ref --short HEAD ) 
+    else
+        branch=$( git symbolic-rev HEAD | sed -e 's@^.*/@@;' )
+    fi
     # When rebasing, the branch look up exits with an error.
     # Verify if this is the case and exit, if so. If not,
     # Let things propagate so the ugly error message shows
