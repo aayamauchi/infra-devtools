@@ -17,7 +17,7 @@ else
     # The 1.7.1 version used by EL6 does not have a '--short' option
     # for the 'symbolic-ref' subcommand.
     branch=$( git symbolic-ref --short HEAD 2>/dev/null ) \
-        || branch=$( git symbolic-rev HEAD | sed -e 's@^.*/@@;' )
+        || branch=$( git symbolic-ref HEAD | sed -e 's@^.*/@@;' )
     # When rebasing, the branch look up exits with an error.
     # Verify if this is the case and exit, if so. If not,
     # Let things propagate so the ugly error message shows
