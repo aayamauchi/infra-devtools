@@ -1,0 +1,39 @@
+#!/bin/sh
+
+# git pre-commit hook to run yamllint on any new or modified yml/yaml files
+
+# called by "git commit" with no arguments
+
+# redirect output to stderr
+exec 1>&2
+
+# find the true location of this script, resolving all symlinks
+# this allows us to find the yamllint config in the same repo
+# modification will be required if you copy the script instead of symlink
+# from https://gist.github.com/TheMengzor/968e5ea87e99d9c41782
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do # resolve $SOURCE until the file is no longer a symlink
+  DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE" # if $SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
+
+# find yaml files about to be committed
+YAMLS=$(git diff --cached --name-only --diff-filter=d "*.yaml" "*.yml")
+
+# no yaml files being committed? pass
+[[ -z $YAMLS ]] && exit 0
+
+# run yamllint
+# any yamllint error will exit with an error code
+# this will abort the commit
+
+# this version uses the repository yamllint config
+# temporarily disabled for being too strict
+#echo Running: yamllint -c "$DIR/../../../conf/yamllint" -f parsable $YAMLS
+#exec yamllint -c "$DIR/../../../conf/yamllint" -f parsable $YAMLS
+
+# this version reports only actual yaml syntax problems
+echo Running: yamllint -d "{rules:{}}" -f parsable $YAMLS
+exec yamllint -d "{rules:{key-duplicates: {}}}" -f parsable $YAMLS
