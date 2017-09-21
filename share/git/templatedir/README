@@ -1,41 +1,70 @@
+# git templatedir
+
 This directory contains git templates which can be used to override
-the default templates.
+the default templates, including git hooks.
 
-Step one: clone the infra-devtools repository,
+## Installation
 
-  git clone git@bitbucket.org:redbookplatform/infra-devtools.git <devtools clone directory>
+1. clone the infra-devtools repository,
 
-* To make the hooks generally available whenever a repository is cloned:
+    `git clone git@bitbucket.org:redbookplatform/infra-devtools.git <DEVTOOLS_PATH>`
 
-  mkdir -p ~/.git_templatedir/hooks
+2. optionally use the hooks in one (or more) of the following ways:
 
-Add the following to your ~/.gitconfig
+    * Always use the latest pulled infra-devtools hooks:
 
-[init]
-	templatedir = ~/.git_templatedir
+      * Globally, overriding every repo's hooks:
 
-Symlink the hooks from the checkout into this directory, using:
+        `git config --global core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
-  for f in <devtools clone directory>/share/git/templatedir/hooks/* ; do
-    ln -snf ${f} ~/.git_templatedir/hooks/${f##*/}
-  done
+      * In a single repo:
 
-* To make the hooks available on a per-repository basis, use:
+        `git config core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
-  for f in <devtools clone directory>/share/git/templatedir/hooks/* ; do
-    ln -snf ${f} <some git clone director>/.git/hooks/${f##*/}
-  done
+    * Copy the hooks when a new repo is cloned or init'd:
 
-The global configuration will make the hooks the defaults on any new git clone.
-The per-repository configuration will only make the hooks available for
-the specified repository.  In either case, using symlinks means that the
-hooks from the devtools repository can coexist with other hooks you may
-have in either of these directories.
+      * Copy from the latest pulled infra-devtools hooks:
+
+          * Globally, for every repo:
+
+            `git config --global init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+
+          * For just the current repo, enabling re-init of the repo:
+
+            `git config init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+
+      * Copy later from a copy of the infra-devtool hooks made right now:
+
+          1. `mkdir -p ~/.config/git/templatedir/hooks`
+          2. `for f in <DEVTOOLS_PATH>/share/git/templatedir/hooks/* ; do
+               cp ${f} ~/.config/git/templatedir/hooks/${f##*/}
+              done`
+          3. * Globally, for every repo:
+
+                `git config --global init.templatedir ~/.config/git/templatedir/hooks`
+
+              * For just the current repo, enabling re-init of the repo:
+
+                `git config init.templatedir ~/.config/git/templatedir/hooks`
+
+    * Copy the current infra-devtools hooks to the single repository:
+
+      `cp <DEVTOOLS_PATH>/share/git/templatedir/hooks/* <SINGLE_REPO_PATH>/.git/hooks/`
+
+
+## Notes
+
+### pre-commit
+
+This hook requires [YAMLLint](https://yamllint.readthedocs.io/) and will
+abort commits that contain invalid YAML syntax.
+
+### prepare-commit-msg
 
 A very useful setting (for vi/vim users) when using the prepare-commit-msg
 hook is the following:
 
-export GIT_EDITOR='vim +normal\ \$ -c startinsert!'
+`export GIT_EDITOR='vim +normal\ \$ -c startinsert!'`
 
 With this setting in the environment, git will go to the end of the first
 line of the commit message and open in edit mode.  Adding this to a
