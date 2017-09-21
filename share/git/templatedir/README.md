@@ -5,19 +5,19 @@ the default templates, including git hooks.
 
 ## Installation
 
-1. clone the infra-devtools repository,
+1. Clone the infra-devtools repository:
 
     `git clone git@bitbucket.org:redbookplatform/infra-devtools.git <DEVTOOLS_PATH>`
 
-2. optionally use the hooks in one (or more) of the following ways:
+2. Optionally use the hooks in one (or more) of the following ways:
 
     * Always use all of the latest pulled infra-devtools hooks:
 
-        * Globally, overriding every repo's hooks:
+        * Globally, overriding all hooks in every repo without a local core.hooksPath:
 
             `git config --global core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
-        * In a single repo:
+        * Locally, in the current repo:
 
             `git config core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
@@ -30,7 +30,7 @@ the default templates, including git hooks.
             3. Repeat previous step for each desired hook
             4. `git config --global core.hooksPath ~/.config/git/templatedir/hooks`
 
-        * In a single repo:
+        * Locally, in a single repo:
 
             1. `ln -snf <DEVTOOLS_PATH>/share/git/templatedir/hooks/<HOOK_NAME> <SINGLE_REPO_PATH>/.git/hooks/`
             2. Repeat previous step for each desired hook
@@ -43,7 +43,7 @@ the default templates, including git hooks.
 
                 `git config --global init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
-            * For just the current repo, enabling re-init of the repo:
+            * Locally, in the current repo, enabling re-init of the repo:
 
                 `git config init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
@@ -58,7 +58,7 @@ the default templates, including git hooks.
 
                     `git config --global init.templatedir ~/.config/git/templatedir/hooks`
 
-                * For just the current repo, enabling re-init of the repo:
+                * Locally, in the current repo, enabling re-init of the repo:
 
                     `git config init.templatedir ~/.config/git/templatedir/hooks`
 
