@@ -11,7 +11,7 @@ the default templates, including git hooks.
 
 2. optionally use the hooks in one (or more) of the following ways:
 
-    * Always use the latest pulled infra-devtools hooks:
+    * Always use all of the latest pulled infra-devtools hooks:
 
         * Globally, overriding every repo's hooks:
 
@@ -20,6 +20,20 @@ the default templates, including git hooks.
         * In a single repo:
 
             `git config core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+
+    * Always use some of the latest pulled infra-devtools hooks:
+
+        * Globally, for every repo:
+
+            1. `mkdir -p ~/.config/git/templatedir/hooks`
+            2. `ln -snf <DEVTOOLS_PATH>/share/git/templatedir/hooks/<HOOK_NAME> ~/.config/git/templatedir/hooks/`
+            3. Repeat previous step for each desired hook
+            4. `git config --global core.hooksPath ~/.config/git/templatedir/hooks`
+
+        * In a single repo:
+
+            1. `ln -snf <DEVTOOLS_PATH>/share/git/templatedir/hooks/<HOOK_NAME> <SINGLE_REPO_PATH>/.git/hooks/`
+            2. Repeat previous step for each desired hook
 
     * Copy the hooks when a new repo is cloned or init'd:
 
@@ -39,7 +53,8 @@ the default templates, including git hooks.
             2. `for f in <DEVTOOLS_PATH>/share/git/templatedir/hooks/* ; do
                  cp ${f} ~/.config/git/templatedir/hooks/${f##*/}
                 done`
-            3. * Globally, for every repo:
+            3. Optionally, delete some hooks copied in the previous step
+            4. * Globally, for every repo:
 
                     `git config --global init.templatedir ~/.config/git/templatedir/hooks`
 
@@ -47,7 +62,7 @@ the default templates, including git hooks.
 
                     `git config init.templatedir ~/.config/git/templatedir/hooks`
 
-    * Copy the current infra-devtools hooks to the single repository:
+    * Copy the current infra-devtools hooks to a single repository:
 
         `cp <DEVTOOLS_PATH>/share/git/templatedir/hooks/* <SINGLE_REPO_PATH>/.git/hooks/`
 
