@@ -35,5 +35,5 @@ YAMLS=$(git diff --cached --name-only --diff-filter=d "*.yaml" "*.yml")
 #exec yamllint -c "$DIR/../../../conf/yamllint" -f parsable $YAMLS
 
 # this version reports only actual yaml syntax problems
-echo Running: yamllint -d "{rules:{}}" -f parsable $YAMLS
+echo Running: yamllint -d "{rules:{key-duplicates: {}}}" -f parsable $YAMLS
 exec yamllint -d "{rules:{key-duplicates: {}}}" -f parsable $YAMLS
