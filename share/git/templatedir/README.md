@@ -15,11 +15,11 @@ the default templates, including git hooks.
 
         * Globally, overriding every repo's hooks:
 
-          `git config --global core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+            `git config --global core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
         * In a single repo:
 
-          `git config core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+            `git config core.hooksPath <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
     * Copy the hooks when a new repo is cloned or init'd:
 
@@ -27,11 +27,11 @@ the default templates, including git hooks.
 
             * Globally, for every repo:
 
-              `git config --global init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+                `git config --global init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
             * For just the current repo, enabling re-init of the repo:
 
-              `git config init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
+                `git config init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
         * Copy later from a copy of the infra-devtool hooks made right now:
 
@@ -41,11 +41,11 @@ the default templates, including git hooks.
                 done`
             3. * Globally, for every repo:
 
-                  `git config --global init.templatedir ~/.config/git/templatedir/hooks`
+                    `git config --global init.templatedir ~/.config/git/templatedir/hooks`
 
                 * For just the current repo, enabling re-init of the repo:
 
-                  `git config init.templatedir ~/.config/git/templatedir/hooks`
+                    `git config init.templatedir ~/.config/git/templatedir/hooks`
 
     * Copy the current infra-devtools hooks to the single repository:
 
