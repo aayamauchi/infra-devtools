@@ -49,7 +49,7 @@ the default templates, including git hooks.
 
     * Copy the current infra-devtools hooks to the single repository:
 
-      `cp <DEVTOOLS_PATH>/share/git/templatedir/hooks/* <SINGLE_REPO_PATH>/.git/hooks/`
+        `cp <DEVTOOLS_PATH>/share/git/templatedir/hooks/* <SINGLE_REPO_PATH>/.git/hooks/`
 
 
 ## Notes
