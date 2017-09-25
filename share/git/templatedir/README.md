@@ -47,7 +47,7 @@ the default templates, including git hooks.
 
                 `git config init.templatedir <DEVTOOLS_PATH>/share/git/templatedir/hooks`
 
-        * Copy later from a copy of the infra-devtool hooks made right now:
+        * Copy later from a copy of the infra-devtools hooks made right now:
 
             1. `mkdir -p ~/.config/git/templatedir/hooks`
             2. `for f in <DEVTOOLS_PATH>/share/git/templatedir/hooks/* ; do

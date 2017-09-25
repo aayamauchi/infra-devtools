@@ -20,7 +20,9 @@ done
 DIR="$( cd -P "$( dirname "$SOURCE" )" && pwd )"
 
 # find yaml files about to be committed
-YAMLS=$(git diff --cached --name-only --diff-filter=d "*.yaml" "*.yml")
+IFS=$'\n'
+YAMLS=($(git diff --cached --name-only --diff-filter=d "*.yaml" "*.yml"))
+unset IFS
 
 # no yaml files being committed? pass
 [[ -z $YAMLS ]] && exit 0
@@ -35,6 +37,6 @@ YAMLS=$(git diff --cached --name-only --diff-filter=d "*.yaml" "*.yml")
 #exec yamllint -c "$DIR/../../../conf/yamllint" -f parsable $YAMLS
 
 # this version reports only actual yaml syntax problems
-command=(yamllint -d "{ rules: { key-duplicates: {} } }" "$YAMLS")
+command=(yamllint -d "{ rules: { key-duplicates: {} } }" ${YAMLS[@]})
 echo "Running: ${command[@]}"
 exec "${command[@]}"
