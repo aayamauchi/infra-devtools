@@ -37,36 +37,6 @@ fi
 : ${LOCK_FILE:=/var/lock/subsys/${PROG}}
 : ${LOG_PATH:=/var/log/${PROG}}
 
-: ${JAVA_HOME:=/opt/java_home/jre}
-: ${JAVA_BIN:=${JAVA_HOME}/bin/java}
-
-# Setting a JVM_ADD_OPTS variable in the sysconfig file will append
-# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
-if [ -z "${JVM_OPTS+set}" ] ; then
-    JVM_OPTS='-XX:+UseG1GC'
-    JVM_OPTS+=' -XX:+UseBiasedLocking'
-    JVM_OPTS+=' -XX:BiasedLockingStartupDelay=0'
-fi
-
-: ${JAVA_APP:=com.hotschedules.keycloakserver.HotSchedulesIDPServer}
-
-# Setting a JAVA_ADD_OPTS variable in the sysconfig file will append
-# options to JAVA_OPTS.  Setting JAVA_OPTS will override what follows.
-if [ -z "${JAVA_OPTS+set}" ] ; then
-    JAVA_OPTS=-Dpidfile.path=${PID_FILE}
-    JAVA_OPTS+=" -Dlogback.configurationFile=${PROG_HOME}/conf/logback.xml"
-    JAVA_OPTS+=" -Djgroups.tcp.address=$( curl -s 169.254.169.254/latest/meta-data/local-ipv4 )"
-fi
-
-# Setting a JMX_ADD_OPTS variable in the sysconfig file will append
-# options to JVM_OPTS.  Setting JVM_OPTS will override what follows.
-if [ -z "${JMX_OPTS+set}" ] ; then
-    : JMX_OPTS=
-fi
-
-if [ -z "${CLASSPATH+set}" ]; then
-    CLASSPATH=${PROG_HOME}/conf:${PROG_HOME}/lib/*
-fi
 
 : ${STOP_RETRY_INTERVAL:=3}
 # By default, the max number of stop retry attempts is unlimited.
@@ -91,11 +61,6 @@ start() {
         return 4
     fi
 
-    if [ ! -x ${JAVA_BIN} ] ; then
-        log_failure_msg ${JAVA_BIN} not $( [ -f ${JAVA_BIN} ] && echo executable || echo found )
-        return 5
-    fi
-
     local current_state=0
     rh_status -q || current_state=${?}
     case "${current_state}" in
@@ -111,19 +76,8 @@ start() {
 
     ulimit ${ULIMIT_OPTS} &>/dev/null || true
 
-    export JAVA_HOME JDK_HOME JRE_HOME CLASSPATH
-
-    local cmd="${JAVA_BIN}"
-    cmd+="${CLASSPATH+ -classpath '${CLASSPATH}'}"
-    cmd+="${JVM_OPTS+ }${JVM_OPTS}"
-    cmd+="${JVM_ADD_OPTS+ }${JVM_ADD_OPTS}"
-    cmd+="${JAVA_OPTS+ }${JAVA_OPTS}"
-    cmd+="${JAVA_ADD_OPTS+ }${JAVA_ADD_OPTS}"
-    cmd+="${JMX_OPTS+ }${JMX_OPTS}"
-    cmd+="${JMX_ADD_OPTS+ }${JMX_ADD_OPTS}"
-    cmd+="${JAVA_APP+ }${JAVA_APP}"
-    cmd+="${JAVA_APP_OPTS+ }${JAVA_APP_OPTS}"
-    cmd+="${JAVA_APP_ADD_OPTS+ }${JAVA_APP_ADD_OPTS}"
+    # Form the command used to start the daemon.
+    local cmd=
 
     cd ${PROG_HOME}
 
@@ -145,13 +99,11 @@ start() {
 stop() {
 
     local process_state=0
-    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
-        exec &>/dev/null
-        shift
-    fi
 
     if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
+        if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+            log_failure_msg superuser privileges are required
+        fi
         return 4
     fi
 
@@ -160,10 +112,12 @@ stop() {
     if [ ${process_state} -gt 0 ] ; then
         if [ ${process_state} -lt 4 ] ; then
             rm -f ${PID_FILE} ${LOCK_FILE}
-            log_success_msg
+            #log_success_msg
             return 0
         else
-            log_failure_msg process ${PROG} in unknown state
+            if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+                log_failure_msg process ${PROG} in unknown state
+            fi
             return 1
         fi
     fi
@@ -182,10 +136,12 @@ stop() {
     rh_status -q || process_state=${?}
     if [ ${process_state} -lt 4 ] ; then
         rm -f ${LOCK_FILE} ${PID_FILE}
-        log_success_msg
+        #log_success_msg
         return 0
     else
-        log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
+        if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+            log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
+        fi
         return 1
     fi
 }

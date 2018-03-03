@@ -1,0 +1,417 @@
+#!/bin/bash
+#
+# <daemonname> <summary>
+#
+# chkconfig:   - 81 16
+# description: <description, split multiple lines with \
+#              a backslash>
+
+### BEGIN INIT INFO
+# Provides:
+# Required-Start: $local_fs $network
+# Required-Stop: $local_fs $network
+# Should-Start:
+# Should-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description:
+# Description:
+### END INIT INFO
+
+source /etc/init.d/functions
+source /lib/lsb/init-functions
+
+: ${PROG:=${0##*/}}
+
+if [ -r /etc/sysconfig/${PROG} ] ; then
+    source /etc/sysconfig/${PROG}
+fi
+
+# This script is particularly messy due to the fact tht it's
+# really managing two different processes.  Breaking a pm2
+# script out separately really would have been a good idea.
+
+# application environment variables
+# ===
+: ${PROG_USER:=${PROG}}
+: ${PROG_GROUP:=${PROG_USER}}
+: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+
+# Even though these are used by pm2, it's merely to describe
+# this application. If pm2 were broken out separatetly, these
+# would be parameters passwd to pm2 to specify which app is
+# the command applies to.
+: ${APPLICATION_DIRECTORY:=${PROG_HOME}}
+: ${APPLICATION_START:=index.js}
+
+# pm2 enviroment variables
+# ===
+
+# PM2_HOME is actually used by pm2.  The rest are helpers
+# used by this script.
+: ${PM2_HOME:=/var/run/${PROG}/.pm2}
+: ${PM2_CMD:="$( which --skip-alias pm2 )"}
+: ${PM2_PID_FILE:=${PM2_HOME}/pm2.pid}
+
+# TODO -- fully debug this, or remove it.
+# What was I doing here?
+# Generally do not want the pm2 process console outputs.
+if [ -d "${PM2_LOG_PATH}" ] ; then
+    PM2_OUT_LOG=${PM2_LOG_PATH}/pm2-${PROG}.out
+    PM2_ERR_LOG=${PM2_LOG_PATH}/pm2-${PROG}.err
+else
+    PM2_OUT_LOG=/dev/null
+    PM2_ERR_LOG=/dev/null
+fi
+
+# This is for the daemon command -- not pm2 or the application
+: ${LOG_PATH:=/var/log/${PROG}}
+
+: ${STOP_RETRY_INTERVAL:=3}
+# By default, the max number of stop retry attempts is unlimited.
+[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+
+: ${PID_FILE_PATH:=${PM2_HOME}/pids}
+: ${PID_FILE_NAME:=${PROG}}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
+: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
+
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG}"
+
+# This is what is currently set as the default.
+: ${ULIMIT_OPTS:=='-n 64000 -u 64000'}
+
+# Just dumb.
+logger() {
+    local line=
+
+    while read line ; do
+        [ -n "${line}" ] || continue
+        if [ "${1-0}" -eq 0 ] ; then
+            log_success_msg "${line}"
+        else
+            log_failure_msg "${line}"
+        fi
+    done
+}
+
+# What is this?
+wrapped_pm2() {
+    runuser \
+        -s /bin/bash ${PROG_USER} \
+        -c "PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
+}
+
+# TODO: can this be done without escalated prviliges.
+
+# This is one of the status commands which needs to be wrapped to
+# ensure that the script does not start a daemon on a status check.
+app_list() {
+    local ret_val=0
+    if [ "${UID}" -eq 0 ] ; then
+        # Only perform this when run as root -- otherwise the
+        # standard status is returned.  Also, do not run this
+        # if the daemon has not been started: it will start an
+        # unwanted "God Daemon" on the fly -- unless this is
+        # what is wanted.
+
+        wrapped_pm2 list
+    else
+        ret_val=4
+    fi
+
+    return ${ret_val}
+}
+
+process_status() {
+    local ret_val=0
+    local msg=
+
+    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
+        local quiet=true
+        shift
+    else
+        unset quiet
+    fi
+    
+    msg="$( status ${@} )" || ret_val=${?}
+
+    if [ -z "${quiet+set}" ] ; then
+        [ ${ret_val} -eq 0 ] \
+            && log_success_msg "${msg}" \
+            || log_failure_msg "${msg}"
+    fi
+
+    return ${ret_val}
+}
+
+inverted_status() {
+    # For a lot of stuff, we need the "good" state of the check
+    # to be when the process is properly stopped (code 3). Take
+    # The same args as status, but invert the return code.
+    local ret_val=0
+
+    process_status ${@} || ret_val=${?}
+
+    if [ ${ret_val} -eq 0 ] ; then
+        ret_val=3
+    elif [ ${ret_val} -eq 3 ] ; then
+        ret_val=0
+    fi
+
+    return ${ret_val}
+}
+
+pm2_status() {
+    process_status ${@} -p ${PM2_PID_FILE} pm2
+}
+
+app_status() {
+    process_status ${@} -p ${PID_FILE} ${PROG}
+}
+
+full_status() {
+    # Status check for the app managed by pm2.
+
+    local ret_val=0
+    local msg=
+    pm2_status ${1} && app_status ${1} || ret_val=${?}
+
+    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
+        if [ ${ret_val} -eq 0 -a ${UID} -eq 0 ] ; then
+            # Do not let non-root status checks return 4.
+            # Also, running the list command when pm2 is
+            # not running will actually silently start the
+            # daemon, which is highly undesirable.
+            app_list
+        fi
+    fi
+    
+    return ${ret_val}
+}
+
+start() {
+
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    local current_state=0
+    full_status -q || current_state=${?}
+    case "${current_state}" in
+        0)
+            log_success_msg "${PROG} is already running"
+            return 0
+        ;;
+        [12])
+            # Try clearing pid and lock files and hope for the best.
+            rm -f ${PID_FILE} ${LOCK_FILE}
+        ;;
+    esac
+
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    local cmd="PM2_HOME=${PM2_HOME} USER=${PROG_USER} ${PM2_CMD} start"
+    cmd+=" ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
+    cmd+=" --output ${PM2_OUT_LOG}"
+    cmd+=" --error ${PM2_ERR_LOG}"
+    cmd+=" --pid ${PID_FILE}"
+    cmd+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
+
+    # This may not be needed, or may actually cause a problem.
+    cd ${APPLICATION_DIRECTORY}
+
+    daemon ${START_STOP_DAEMON_ARGS} \
+        "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err"
+
+    sleep ${STOP_RETRY_INTERVAL}
+
+    # REALLY stupid.  If we don't query pm2 using the app user and
+    # someone uses a root sudo, the sockets will end up being owned
+    # by a different user.
+    if app_status -q ; then
+        touch ${LOCK_FILE}
+        log_success_msg
+        return 0
+    else
+        rm -f ${PID_FILE}
+        log_failure_msg unable to start ${PROG}
+        return 1
+    fi
+}
+
+is_not_running() {
+    # Just a script to make the "good" state of a status check.
+
+    :
+}
+
+pm2_stop() {
+    local retries=0 pm2_state=0
+
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    # This "stop all" is what actually kills the "God Daemon",
+    # I think.  Really don't care about the exit codes and doubt
+    # that they would be usable, any way;
+
+    while [ ${retries} -lt ${RETRY_MAX_LIMIT} ] ; do
+        # We don't care about the exit codes from pm2.
+        wrapped_pm2 stop all || true
+        wrapped_pm2 kill || true
+        # Sleep time here may be needed.
+        pm2_status -q 
+        
+    done
+
+    # Brute force the thing.
+    kill -9 $(< ${PM2_PID_FILE} )
+}
+
+app_stop() {
+    # Clarify this.  This stops only the apecified application
+    # managed by pm2, not the pm2 daemon, itself.
+
+    local process_state=0 retries=0
+    app_status -1 || process_state=${?}
+
+    while [ ${process_state} -eq 0 -a ${retries} -lt ] ; do
+         #wrapped_pm2 delete all || true
+         wrapped_pm2 stop ${PROG} || true
+         wrapped_pm2 delete ${PROG} || true
+
+        app_status -q || process_state=${?}
+
+        ((retries++))
+    done
+
+    case ${process_state} in
+    [1-3])
+        rm -f ${PID_FILE} ${LOCK_FILE}
+        rm -f ${PID_FILE} ${LOCK_FILE}
+        log_success_msg ${PROG} is not running
+        return 0
+    ;;
+    0)
+        killproc -p ${PID_FILE} || true
+    ;;
+    *)
+        log_failure_msg process ${PROG} in unknown state
+        return 1
+    ;;
+    esac
+
+    if [ ${process_state} -gt 0 ] ; then
+        if [ ${process_state} -lt 4 ] ; then
+            rm -f ${PID_FILE} ${LOCK_FILE}
+            log_success_msg ${PROG} is not running
+            return 0
+        else
+            log_failure_msg process ${PROG} in unknown state
+            return 1
+        fi
+    fi
+
+    killproc -p ${PID_FILE} || true
+
+    sleep ${STOP_RETRY_INTERVAL}
+
+    # make this a forcible stop, by default.
+    local retries=0
+    while app_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
+        kill -9 $(< ${PID_FILE} )
+        [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
+        sleep ${STOP_RETRY_INTERVAL}
+    done
+
+    app_status -q || process_state=${?}
+    if [ ${process_state} -lt 4 ] ; then
+        rm -f ${LOCK_FILE} ${PID_FILE}
+        log_success_msg ${PROG} has been stopped
+        return 0
+    else
+        log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
+        return 1
+    fi
+}
+
+full_stop() {
+    app_stop && pm2_stop
+}
+
+reload() {
+
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    local ret_val=0
+    local msg="$( wrapped_pm2 reload all 2>&1 )" \
+        || ret_val=${?}
+
+    if [ ${ret_val} -eq 0 ] ; then
+        log_success_msg
+    else
+        log_failure_msg failed to reload
+        echo "${msg}"
+        ret_val=1
+    fi
+
+    return ${ret_val}
+
+}
+
+exit_val=0
+case "${1}" in
+    start)
+        echo -n $"Starting ${PROG}: "
+        start || exit_val=${?}
+        ;;
+    stop)
+        echo -n $"Stopping ${PROG}: "
+        stop || exit_val=${?}
+        ;;
+    restart)
+        echo -n $"Stopping ${PROG}: "
+        if [ "$( type -t ${1/-/_} )" == function ] ; then
+            ${1/-/_} || exit_val=${?}
+        else
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+            fi
+        fi
+        ;;
+    reload|force-reload)
+        # Nodejs pm2 actually implements a reloca.
+        echo -n $"Reloading ${PROG}"
+        reload
+        ;;
+    status)
+        app_status || exit_val=${?}
+        ;;
+    try-restart|condrestart)
+        if app_status -q ; then
+            echo -n $"Stopping ${PROG}: "
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+            fi
+        else
+            log_success_msg process ${PROG} is not running
+        fi
+        ;;
+    *)
+        echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
+        exit_val=2
+        ;;
+esac
+
+exit ${exit_val}
