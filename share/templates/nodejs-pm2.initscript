@@ -81,19 +81,122 @@ START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfil
 # This is what is currently set as the default.
 : ${ULIMIT_OPTS:=='-n 64000 -u 64000'}
 
-# Just dumb.
-logger() {
-    local line=
+# ===
+# Generic extensions of the initscript functions.
+# ===
 
-    while read line ; do
-        [ -n "${line}" ] || continue
-        if [ "${1-0}" -eq 0 ] ; then
-            log_success_msg "${line}"
-        else
-            log_failure_msg "${line}"
-        fi
+process_status() {
+
+    # A status function which allows for silent operation as well
+    # as allowing inverting return codes 0 and 3 to make life
+    # easier when stopping a process, where 0 is the desired state.
+
+    local ret_val=0
+
+    while [[ ${1} =~ ^(-q|--quiet|-i|--invert) ]] ; do
+        case ${1} in
+        -q|--quiet)
+            local quiet=true
+        ;;
+        -i|--invert)
+            local invert=true
+        ;;
+        esac
+        shift
     done
+
+    msg="$( status ${@} )" || ret_val=${?}
+
+    if [ -z "${quiet+set}" ] ; then
+        if [ ${ret_val} -eq 0 ] ; then
+            log_success_msg "${msg}"
+        else
+            log_failure_msg "${msg}"
+        fi
+    fi
+
+    if [ -n "${invert+set}" ] ; then
+        ret_val=$( echo ${ret_val} | tr 03 30 )
+    fi
+
+    return ${ret_val}
 }
+
+process_stop() {
+
+    # A stop function with stale pid and lock file autoclearing,
+    # retries, and a sigkill if everything else fails.
+
+    local process_state=0
+    local retry_limit=${RETRY_LIMIT-3} retries=0
+
+    local args=(${@})
+    local pid_file= lock_file= process_name=
+    while [ ${#} -gt 0 ] ; do
+        if [ ${#} -eq 1 ] ; then
+            process_name=${1}
+            shift
+            break
+        fi
+        case ${1} in
+        -p)
+            shift
+            pid_file=${1}
+        ;;
+        -l)
+            shift
+            lock_file=${1}
+        ;;
+        esac
+        shift
+    done
+    process_status -q -i ${args[@]} || process_state=${?}
+ 
+    while [ ${retries} -lt ${retry_limit} ] ; do
+
+        # Remove stale pid or lock files.
+        if [ ${process_state} -gt 0 ] ; then
+            if [ ${process_state} -le 2 ] ; then
+                rm -f ${pid_file} ${lock_file}
+            else
+                stop ${@}
+            fi
+            process_status -q -i ${@} || process_state=${?}
+        fi
+
+        [ ${process_state} -ne 0 ] || break
+
+        ((retries++))
+    done
+
+    if [ ${process_state} -eq 0 ] ; then
+        log_success_msg
+    else
+        # Fuck.  If the pid file is there, need to use it.
+        log_failure_msg "max retries (${retry_limit}) exceeeded, performing sigkill"
+        if [ -n "${pid_file}" ] ; then
+            kill -9 $(< ${pid_file} )
+        else
+            killall -9 ${process_name}
+        fi
+
+        process_status -q -i ${@} || process_state=${?}
+
+        if [[ ${process_state} =~ ^[12]$ ]] ; then
+            rm -f ${pid_file} ${lock_file}
+            process_status -q -i ${@} || process_state=${?}
+        fi
+
+        if [ ${process_state} -eq 0 ] ; then
+            log_success_msg "process sigkill succeeed"
+        else
+            log_failure_msg "porcess sigkill failed"
+        fi
+    fi
+
+    return ${process_state}
+}
+
 
 # What is this?
 wrapped_pm2() {
@@ -102,7 +205,7 @@ wrapped_pm2() {
         -c "PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
 }
 
-# TODO: can this be done without escalated prviliges.
+# TODO: can this be done without escalated privileges.
 
 # This is one of the status commands which needs to be wrapped to
 # ensure that the script does not start a daemon on a status check.
@@ -118,45 +221,6 @@ app_list() {
         wrapped_pm2 list
     else
         ret_val=4
-    fi
-
-    return ${ret_val}
-}
-
-process_status() {
-    local ret_val=0
-    local msg=
-
-    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
-        local quiet=true
-        shift
-    else
-        unset quiet
-    fi
-    
-    msg="$( status ${@} )" || ret_val=${?}
-
-    if [ -z "${quiet+set}" ] ; then
-        [ ${ret_val} -eq 0 ] \
-            && log_success_msg "${msg}" \
-            || log_failure_msg "${msg}"
-    fi
-
-    return ${ret_val}
-}
-
-inverted_status() {
-    # For a lot of stuff, we need the "good" state of the check
-    # to be when the process is properly stopped (code 3). Take
-    # The same args as status, but invert the return code.
-    local ret_val=0
-
-    process_status ${@} || ret_val=${?}
-
-    if [ ${ret_val} -eq 0 ] ; then
-        ret_val=3
-    elif [ ${ret_val} -eq 3 ] ; then
-        ret_val=0
     fi
 
     return ${ret_val}
@@ -241,102 +305,60 @@ start() {
     fi
 }
 
-is_not_running() {
-    # Just a script to make the "good" state of a status check.
-
-    :
-}
-
 pm2_stop() {
     local retries=0 pm2_state=0
-
+    
     if [ ${UID} -ne 0 ] ; then
         log_failure_msg superuser privileges are required
         return 4
     fi
 
+    pm2_status -q -i || pm2_state=${?}
+
     # This "stop all" is what actually kills the "God Daemon",
     # I think.  Really don't care about the exit codes and doubt
     # that they would be usable, any way;
 
-    while [ ${retries} -lt ${RETRY_MAX_LIMIT} ] ; do
-        # We don't care about the exit codes from pm2.
+    while [ ${pm2_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
+
         wrapped_pm2 stop all || true
         wrapped_pm2 kill || true
-        # Sleep time here may be needed.
-        pm2_status -q 
         
+        # Sleep time here may be needed.
+        sleep 3
+
+        pm2_status -q -i || pm2_state=${?}
     done
 
-    # Brute force the thing.
-    kill -9 $(< ${PM2_PID_FILE} )
+    if [ ${pm2_state} -eq 0 ] ; then
+        log_success_msg
+    else
+        process_stop ${@} || pm2_state=${?}
+    fi
+
+    return ${pm2_state}
 }
 
 app_stop() {
-    # Clarify this.  This stops only the apecified application
-    # managed by pm2, not the pm2 daemon, itself.
 
-    local process_state=0 retries=0
-    app_status -1 || process_state=${?}
+    local app_state=0 retries=0 retry_limit=${RETRY_LIMIT-3}
+    app_status -q -i || app_state=${?}
 
-    while [ ${process_state} -eq 0 -a ${retries} -lt ] ; do
-         #wrapped_pm2 delete all || true
+    while [ ${app_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
          wrapped_pm2 stop ${PROG} || true
          wrapped_pm2 delete ${PROG} || true
 
-        app_status -q || process_state=${?}
-
+        app_status -q -i || app_state=${?}
         ((retries++))
     done
 
-    case ${process_state} in
-    [1-3])
-        rm -f ${PID_FILE} ${LOCK_FILE}
-        rm -f ${PID_FILE} ${LOCK_FILE}
-        log_success_msg ${PROG} is not running
-        return 0
-    ;;
-    0)
-        killproc -p ${PID_FILE} || true
-    ;;
-    *)
-        log_failure_msg process ${PROG} in unknown state
-        return 1
-    ;;
-    esac
-
-    if [ ${process_state} -gt 0 ] ; then
-        if [ ${process_state} -lt 4 ] ; then
-            rm -f ${PID_FILE} ${LOCK_FILE}
-            log_success_msg ${PROG} is not running
-            return 0
-        else
-            log_failure_msg process ${PROG} in unknown state
-            return 1
-        fi
-    fi
-
-    killproc -p ${PID_FILE} || true
-
-    sleep ${STOP_RETRY_INTERVAL}
-
-    # make this a forcible stop, by default.
-    local retries=0
-    while app_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
-        kill -9 $(< ${PID_FILE} )
-        [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
-        sleep ${STOP_RETRY_INTERVAL}
-    done
-
-    app_status -q || process_state=${?}
-    if [ ${process_state} -lt 4 ] ; then
-        rm -f ${LOCK_FILE} ${PID_FILE}
-        log_success_msg ${PROG} has been stopped
-        return 0
+    if [ ${app_state} -eq 0 ] ; then
+        log_success_msg
     else
-        log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
-        return 1
+        process_stop ${@} || app_state=${?}
     fi
+
+    return ${app_state}
 }
 
 full_stop() {
@@ -363,7 +385,6 @@ reload() {
     fi
 
     return ${ret_val}
-
 }
 
 exit_val=0
@@ -374,18 +395,14 @@ case "${1}" in
         ;;
     stop)
         echo -n $"Stopping ${PROG}: "
-        stop || exit_val=${?}
+        full_stop || exit_val=${?}
         ;;
     restart)
         echo -n $"Stopping ${PROG}: "
-        if [ "$( type -t ${1/-/_} )" == function ] ; then
-            ${1/-/_} || exit_val=${?}
-        else
-            stop || exit_val=${?}
-            if [ ${exit_val} -eq 0 ] ; then
-                echo -n $"Starting ${PROG}: "
-                start || exit_val=${?}
-            fi
+        full_stop || exit_val=${?}
+        if [ ${exit_val} -eq 0 ] ; then
+            echo -n $"Starting ${PROG}: "
+            start || exit_val=${?}
         fi
         ;;
     reload|force-reload)
@@ -394,18 +411,18 @@ case "${1}" in
         reload
         ;;
     status)
-        app_status || exit_val=${?}
+        full_status || exit_val=${?}
         ;;
     try-restart|condrestart)
         if app_status -q ; then
             echo -n $"Stopping ${PROG}: "
-            stop || exit_val=${?}
+            full_stop || exit_val=${?}
             if [ ${exit_val} -eq 0 ] ; then
                 echo -n $"Starting ${PROG}: "
                 start || exit_val=${?}
             fi
         else
-            log_success_msg process ${PROG} is not running
+            log_success_msg ${PROG} is not running
         fi
         ;;
     *)
