@@ -177,7 +177,7 @@ process_stop() {
         if [ -n "${pid_file}" ] ; then
             kill -9 $(< ${pid_file} )
         else
-            killall -9 ${process_name}
+            killall -9 -u ${PROG_USER}
         fi
 
         process_status -q -i ${@} || process_state=${?}
@@ -305,6 +305,30 @@ start() {
     fi
 }
 
+pm2_nuke() {
+    # Doing a stop may not be enough if a different user (ie. root)
+    # has invoked just about any pm2 command using the same PM2_HOME.
+    # Non-managed process could be using the same content and, worse,
+    # the content may no longer be writable by the process user.  The
+    # pid files woud have overwritten each other if this has happened.
+    # so there is no help coming tracking them down from that source.
+
+    kill -9 $( ps auwwx | grep -e "PM2.*(${PM2_HOME})" )
+
+    local socks=( $(find ${PM2_HOME}/.pm2 -name '*.sock' ) )
+
+    if [ ${#socks[@]} -gt 0 ] ; then
+        fuser -k ${socks[@]}
+        rm -f ${socks[@]}
+    fi
+   
+    # Assume we are no in a PM2-free world.
+    find ${PM2_HOME} \
+        \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
+        -o -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
+
+}
+
 pm2_stop() {
     local retries=0 pm2_state=0
     
@@ -330,10 +354,23 @@ pm2_stop() {
         pm2_status -q -i || pm2_state=${?}
     done
 
+    if [ ${pm2_state} -ne 0 ] ; then
+        process_stop ${@} || pm2_state=${?}
+    fi
+
+    # There is a _nasty_ cornercase to deal when another user
+    # (ie. root) starts another daemon process using the same
+    # PM2_HOME.  It's _really_ easy to do, and a complete shit
+    # show getting things back into a state where it's usable
+    # by the process user again.  Hack in a check/fix, no matter
+    # the state reported by status check (since it won't know
+    # about all the pids which may be running out of PM2_HOME.
+    pm2_nuke
+
+    process_status ${@} || pm2_state=${?}
+
     if [ ${pm2_state} -eq 0 ] ; then
         log_success_msg
-    else
-        process_stop ${@} || pm2_state=${?}
     fi
 
     return ${pm2_state}
