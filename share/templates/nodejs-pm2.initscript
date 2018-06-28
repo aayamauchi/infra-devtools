@@ -81,6 +81,9 @@ START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfil
 # This is what is currently set as the default.
 : ${ULIMIT_OPTS:=='-n 64000 -u 64000'}
 
+# Utility functions
+# ====
+
 # ===
 # Generic extensions of the initscript functions.
 # ===
@@ -473,7 +476,7 @@ app_start() {
 }
 
 # TODO: do we really want to do this?
-full_status() {
+prog_status() {
     # Status check for the app managed by pm2.
 
     local ret_val=0
@@ -493,7 +496,7 @@ full_status() {
     return ${ret_val}
 }
 
-full_stop() {
+prog_stop() {
     app_stop && pm2_stop
 }
 
@@ -519,46 +522,124 @@ reload() {
     return ${ret_val}
 }
 
+commands=($( declare -F | sed -sne '/[[:space:]]prog_/ {s/.*prog_/a;p}' | sort ))
+
+function_defined() {
+    printf -- '%s\n' "${commands[@]}" | grep -q ${1}
+}
+
+usage() {
+    printf -- 'Usage: %s <' ${PROG}
+    printf -- '%s|' ${commands[@]} | sed -e 's/|$/>/'
+    echo
+}
+
 exit_val=0
 case "${1}" in
     start)
         echo -n $"Starting ${PROG}: "
-        start || exit_val=${?}
-        ;;
+        if printf -- '%s\n' "${commands[@]}" | grep -q start ; then
+            prog_start || exit_val=${?}
+        else
+            log_failure_msg "unimplemented function 'prog_start'"
+            exit_val=3
+        fi
+    ;;
     stop)
         echo -n $"Stopping ${PROG}: "
-        full_stop || exit_val=${?}
-        ;;
+        if function_defined prog_stop ; then
+            prog_stop || exit_val=${?}
+        else
+            log_failure_msg "unimplemented function 'prog_stop'"
+            exit_val=3
+        fi
+    ;;
     restart)
-        echo -n $"Stopping ${PROG}: "
-        full_stop || exit_val=${?}
-        if [ ${exit_val} -eq 0 ] ; then
-            echo -n $"Starting ${PROG}: "
-            start || exit_val=${?}
+        # Not ideal, but if a separate restart function exists, use it.
+        if function_defined prog_restart ; then
+            echo -n $"Restarting ${PROG}"
+            prog_restart || exit_val=${?}
+        else
+            echo -n $"Stopping ${PROG}: "
+            if function_defined prog_stop ; then
+                prog_stop || exit_val=${?}
+            else
+                log_failure_msg "unimplemented function 'prog_stop'"
+                exit_val=3
+            fi
+            if [ ${exit_val} -eq 0 ] ; then
+                echo -n $"Starting ${PROG}: "
+                if function_defined prog_start ; then
+                    prog_start || exit_val=${?}
+                else
+                    log_failure_msg "unimplemented function 'prog_start'"
+                    exit_val=3
+                fi
+            fi
+        fi
+    ;;
+    reload|force-reload)
+        echo -n $"Reloading ${PROG}"
+        if function_defined prog_reload ; then
+            prog_reload || exit_val=${?}
+        else
+            log_failure_msg "unimplemented function 'prog_reload'"
+            exit_val=3
         fi
         ;;
+    status)
+        if function_defined prog_status ; then
+            prog_status || exit_val=${?}
+        else
+            log_failure_msg "unimplemented function 'prog_status'"
+            exit_val=4
+        fi
+        ;;
+    try-restart|condrestart)
+        if function_defined prog_status ; then
+            if prog_status -q ; then
+                if function_defined prog_restart ; then
+                    echo -n $"Restarting ${PROG}"
+                    prog_restart || exit_val=${?}
+                else
+                    echo -n $"Stopping ${PROG}: "
+                    if function_defined prog_stop ; then
+                        prog_stop || exit_val=${?}
+                    else
+                        log_failure_msg "unimplemented function 'prog_stop'"
+                        exit_val=3
+                    fi
+                    if [ ${exit_val} -eq 0 ] ; then
+                        echo -n $"Starting ${PROG}: "
+                        if function_defined prog_start ; then
+                            prog_start || exit_val=${?}
+                        else
+                            log_failure_msg "unimplemented function 'prog_start'"
+                            exit_val=3
+                        fi
+                    fi
+                fi
+            else
+                log_success_msg "${PROG} not not running"
+            fi
+        else
+           log_failure_msg "unimplemented function 'prog_status'"
+        fi
+    ;;
     reload|force-reload)
         # Nodejs pm2 actually implements a reloca.
         echo -n $"Reloading ${PROG}"
-        reload
-        ;;
-    status)
-        full_status || exit_val=${?}
-        ;;
-    try-restart|condrestart)
-        if app_status -q ; then
-            echo -n $"Stopping ${PROG}: "
-            full_stop || exit_val=${?}
-            if [ ${exit_val} -eq 0 ] ; then
-                echo -n $"Starting ${PROG}: "
-                start || exit_val=${?}
-            fi
+        if function_defined prog_reload ; then
+            prog_reload || exit_val=${?}
         else
-            log_success_msg ${PROG} is not running
+            log_failure_msg "unimplemented function 'prog_reload'"
+            exit_val=3
         fi
         ;;
     *)
-        echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
+        # ???
+        usage
+        #echo $"$( usage )"
         exit_val=2
         ;;
 esac
