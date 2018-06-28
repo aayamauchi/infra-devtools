@@ -1,8 +1,8 @@
 #!/bin/bash
-# chkconfig:   2345 98 02
+# chkconfig:   2345 98 2
 # description: generic initscript wrapper
 # processname: processname
-
+#
 ### BEGIN INIT INFO
 # Provides:
 # Required-Start: $local_fs $network
@@ -18,70 +18,9 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-: ${PROG:=${0##*/}}
+# Everything here really should be in a lib, but no way to
+# impleement it and have it available on a system.
 
-if [ -r /etc/sysconfig/${PROG} ] ; then
-    source /etc/sysconfig/${PROG}
-fi
-
-# This script is particularly messy due to the fact tht it's
-# really managing two different processes.  Breaking a pm2
-# script out separately really would have been a good idea.
-
-# application environment variables
-# ===
-: ${PROG_USER:=${PROG}}
-: ${PROG_GROUP:=${PROG_USER}}
-: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
-
-# Even though these are used by pm2, it's merely to describe
-# this application. If pm2 were broken out separatetly, these
-# would be parameters passwd to pm2 to specify which app is
-# the command applies to.
-: ${APPLICATION_DIRECTORY:=${PROG_HOME}}
-: ${APPLICATION_START:=index.js}
-
-# pm2 enviroment variables
-# ===
-
-# PM2_HOME is actually used by pm2.  The rest are helpers
-# used by this script.
-: ${PM2_HOME:=/var/run/${PROG}/.pm2}
-: ${PM2_CMD:="$( which --skip-alias pm2 )"}
-: ${PM2_PID_FILE:=${PM2_HOME}/pm2.pid}
-
-# TODO -- fully debug this, or remove it.
-# What was I doing here?
-# Generally do not want the pm2 process console outputs.
-if [ -d "${PM2_LOG_PATH}" ] ; then
-    PM2_OUT_LOG=${PM2_LOG_PATH}/pm2-${PROG}.out
-    PM2_ERR_LOG=${PM2_LOG_PATH}/pm2-${PROG}.err
-else
-    PM2_OUT_LOG=/dev/null
-    PM2_ERR_LOG=/dev/null
-fi
-
-# This is for the daemon command -- not pm2 or the application
-: ${LOG_PATH:=/var/log/${PROG}}
-
-: ${STOP_RETRY_INTERVAL:=3}
-# By default, the max number of stop retry attempts is unlimited.
-[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
-
-: ${PID_FILE_PATH:=${PM2_HOME}/pids}
-: ${PID_FILE_NAME:=${PROG}}
-: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
-: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
-
-START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG}"
-
-# This is what is currently set as the default.
-: ${ULIMIT_OPTS:=='-n 64000 -u 64000'}
-
-# Utility functions
-# ====
-
-# ===
 # Generic extensions of the initscript functions.
 # ===
 
@@ -286,192 +225,19 @@ process_start() {
     return 1
 }
 
-# Node.js pm2 specific functions
-# ===
-
-pm2() {
-    runuser \
-        -s /bin/bash ${PROG_USER} \
-        -c "PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
+prog_defined() {
+    printf -- '%s\n' "${PROG_COMMANDS[@]}" | grep -q "${1}"
 }
 
-pm2_status() {
-    process_status ${@} -p ${PM2_PID_FILE} pm2
+prog_usage() {
+    printf -- 'Usage: %s <' ${PROG}
+    printf -- '%s|' ${PROG_COMMANDS[@]} | sed -e 's/|$/>/'
+    echo
 }
 
-pm2_nuke() {
-    # Doing a stop may not be enough if a different user (ie. root)
-    # has invoked just about any pm2 command using the same PM2_HOME.
-    # Non-managed process could be using the same content and, worse,
-    # the content may no longer be writable by the process user.  The
-    # pid files woud have overwritten each other if this has happened.
-    # so there is no help coming tracking them down from that source.
+: ${PROG:=${0##*/}}
 
-    kill -9 $( ps auwwx | grep -e "PM2.*(${PM2_HOME})" )
-
-    local socks=( $(find ${PM2_HOME}/.pm2 -name '*.sock' ) )
-
-    if [ ${#socks[@]} -gt 0 ] ; then
-        fuser -k ${socks[@]}
-        rm -f ${socks[@]}
-    fi
-   
-    # Assume we are no in a PM2-free world.
-    find ${PM2_HOME} \
-        \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
-        -o -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
-
-}
-
-pm2_stop() {
-    local retries=0 pm2_state=0
-    
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
-        return 4
-    fi
-
-    pm2_status -q -i || pm2_state=${?}
-
-    # This "stop all" is what actually kills the "God Daemon",
-    # I think.  Really don't care about the exit codes and doubt
-    # that they would be usable, any way;
-
-    while [ ${pm2_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
-
-        pm2 stop all || true
-        pm2 kill || true
-        
-        # Sleep time here may be needed.
-        sleep 3
-
-        pm2_status -q -i || pm2_state=${?}
-    done
-
-    if [ ${pm2_state} -ne 0 ] ; then
-        process_stop ${@} || pm2_state=${?}
-    fi
-
-    # There is a _nasty_ cornercase to deal when another user
-    # (ie. root) starts another daemon process using the same
-    # PM2_HOME.  It's _really_ easy to do, and a complete shit
-    # show getting things back into a state where it's usable
-    # by the process user again.  Hack in a check/fix, no matter
-    # the state reported by status check (since it won't know
-    # about all the pids which may be running out of PM2_HOME.
-    pm2_nuke
-
-    process_status ${@} || pm2_state=${?}
-
-    if [ ${pm2_state} -eq 0 ] ; then
-        log_success_msg
-    fi
-
-    return ${pm2_state}
-}
-
-# Node.js functions for apps managed by pm2.
-# ===
-
-app_status() {
-    process_status ${@} -p ${PID_FILE} ${PROG}
-}
-
-app_list() {
-    local ret_val=0
-
-    # Do not do anything if pm2 is not actually running, since
-    # this will cause pm2 to silently start a daemon.
-    if ! pm2_status -q ; then
-        return 1
-    fi
-
-    if [ "${UID}" -ne 0 ] ; then
-        # Do not perform any pm2 commands without a wrapper --
-        # which will require root access to use runuser.  Just
-        # about any pm2 command run when the daemon is not
-        # actually running will cause pm2 to silentely start
-        # one using whatever the current effective ownership.
-
-        return 4
-    fi
-
-    pm2 list
-}
-
-app_stop() {
-
-    local app_state=0 retries=0 retry_limit=${RETRY_LIMIT-3}
-    app_status -q -i || app_state=${?}
-
-    while [ ${app_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
-         pm2 stop ${PROG} || true
-         pm2 delete ${PROG} || true
-
-        app_status -q -i || app_state=${?}
-        ((retries++))
-    done
-
-    if [ ${app_state} -eq 0 ] ; then
-        log_success_msg
-    else
-        process_stop ${@} || app_state=${?}
-    fi
-
-    return ${app_state}
-}
-
-app_start() {
-
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
-        return 4
-    fi
-
-    local current_state=0
-    full_status -q || current_state=${?}
-    case "${current_state}" in
-        0)
-            log_success_msg "${PROG} is already running"
-            return 0
-        ;;
-        [12])
-            # Try clearing pid and lock files and hope for the best.
-            rm -f ${PID_FILE} ${LOCK_FILE}
-        ;;
-    esac
-
-    ulimit ${ULIMIT_OPTS} &>/dev/null || true
-
-    local cmd="PM2_HOME=${PM2_HOME} USER=${PROG_USER} ${PM2_CMD} start"
-    cmd+=" ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
-    cmd+=" --output ${PM2_OUT_LOG}"
-    cmd+=" --error ${PM2_ERR_LOG}"
-    cmd+=" --pid ${PID_FILE}"
-    cmd+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
-
-    # This may not be needed, or may actually cause a problem.
-    cd ${APPLICATION_DIRECTORY}
-
-    daemon ${START_STOP_DAEMON_ARGS} \
-        "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err"
-
-    sleep ${STOP_RETRY_INTERVAL}
-
-    # REALLY stupid.  If we don't query pm2 using the app user and
-    # someone uses a root sudo, the sockets will end up being owned
-    # by a different user.
-    if app_status -q ; then
-        touch ${LOCK_FILE}
-        log_success_msg
-        return 0
-    else
-        rm -f ${PID_FILE}
-        log_failure_msg unable to start ${PROG}
-        return 1
-    fi
-}
-
+# These have to be overridable.
 # TODO: do we really want to do this?
 prog_status() {
     # Status check for the app managed by pm2.
@@ -494,48 +260,53 @@ prog_status() {
 }
 
 prog_stop() {
-    app_stop && pm2_stop
+    # Get the args right -- set the generic process_stop as the default.
+    process_stop
 }
 
-reload() {
+if [ -r /etc/sysconfig/${PROG} ] ; then
+    source /etc/sysconfig/${PROG}
+fi
 
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
-        return 4
-    fi
+# Standard variables which must be set for this script to work
+# ===
+: ${PROG_USER:=${PROG}}
+: ${PROG_GROUP:=${PROG_USER}}
+: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
 
-    local ret_val=0
-    local msg="$( pm2 reload all 2>&1 )" \
-        || ret_val=${?}
-
-    if [ ${ret_val} -eq 0 ] ; then
-        log_success_msg
+if ! { declare -p PROG_COMMANDS 2>/dev/null | grep -qe '^declare -a' ; } ; then
+    if [ -n "${PROG_COMMANDS+set}" ] ; then
+        PROG_COMMANDS=( ${PROG_COMMANDS} )
     else
-        log_failure_msg failed to reload
-        echo "${msg}"
-        ret_val=1
+        ${PROG_COMMANDS=($( declare -F | sed -sne '/[[:space:]]prog_/ {s/.*prog_/a;p}' | sort ))}
     fi
+fi
 
-    return ${ret_val}
-}
+# TODO: yikes.  More shit to standardize/convert.
 
-commands=($( declare -F | sed -sne '/[[:space:]]prog_/ {s/.*prog_/a;p}' | sort ))
+# This is for the daemon command -- not pm2 or the application
+: ${LOG_PATH:=/var/log/${PROG}}
 
-function_defined() {
-    printf -- '%s\n' "${commands[@]}" | grep -q ${1}
-}
+: ${STOP_RETRY_INTERVAL:=3}
+# By default, the max number of stop retry attempts is unlimited.
+[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
 
-usage() {
-    printf -- 'Usage: %s <' ${PROG}
-    printf -- '%s|' ${commands[@]} | sed -e 's/|$/>/'
-    echo
-}
+: ${PID_FILE_PATH:=${PM2_HOME}/pids}
+: ${PID_FILE_NAME:=${PROG}}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
+: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
+
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG}"
+
+# This is what is currently set as the default.
+: ${ULIMIT_OPTS:='-n 64000 -u 64000'}
+
 
 exit_val=0
 case "${1}" in
     start)
         echo -n $"Starting ${PROG}: "
-        if printf -- '%s\n' "${commands[@]}" | grep -q start ; then
+        if printf -- '%s\n' "${PROG_COMMANDS[@]}" | grep -q start ; then
             prog_start || exit_val=${?}
         else
             log_failure_msg "unimplemented function 'prog_start'"
@@ -635,7 +406,7 @@ case "${1}" in
         ;;
     *)
         # ???
-        usage
+        prog_usage
         #echo $"$( usage )"
         exit_val=2
         ;;
