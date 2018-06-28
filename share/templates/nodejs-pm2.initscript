@@ -132,6 +132,7 @@ process_stop() {
 
     local args=(${@})
     local pid_file= lock_file= process_name=
+
     while [ ${#} -gt 0 ] ; do
         if [ ${#} -eq 1 ] ; then
             process_name=${1}
@@ -164,6 +165,12 @@ process_stop() {
             process_status -q -i ${@} || process_state=${?}
         fi
 
+        if [ ${process_state} -eq 4 ] ; then
+            # There is no resean to continue if this is permissions problem.
+            log_failure_msg insufficient privilege to stop process
+            return 4
+        fi
+
         [ ${process_state} -ne 0 ] || break
 
         ((retries++))
@@ -190,71 +197,231 @@ process_stop() {
         if [ ${process_state} -eq 0 ] ; then
             log_success_msg "process sigkill succeeed"
         else
-            log_failure_msg "porcess sigkill failed"
+            log_failure_msg "process sigkill failed"
         fi
     fi
 
     return ${process_state}
 }
 
+process_start() {
 
-# What is this?
-wrapped_pm2() {
+    # Generic function to start a process using the initscript daemon function.
+
+    local args=("${@}")
+    local process_name= pid_file= lock_file=
+
+    while [ ${#} -gt 0 ] ; do
+        if [ ${#} -eq 1 ] ; then
+            process_name=${1}
+            shift
+            break
+        fi
+        case "${1}" in
+        -p)
+            shift
+            pid_file=${1}
+        ;;
+        -l)
+            shift
+            lock_file=${1}
+        ;;
+        esac
+    done
+        
+    # TODO -- make this part of the daemon function return.
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    local current_state=0
+    # Subclass this?
+    process_status -q ${args[@]} || process_state=${?}
+
+    case "${process_state}" in
+        0)
+            log_success_msg "${PROG} is already running"
+            return 0
+        ;;
+        [12])
+            # Try clearing pid and lock files and hope for the best.
+            rm -f ${PID_FILE} ${LOCK_FILE}
+        ;;
+    esac
+
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    # TODO: check this earlier and throw an error if required envs are not set.
+    local cmd=${PROG_CMD}
+##    local cmd="PM2_HOME=${PM2_HOME} USER=${PROG_USER} ${PM2_CMD} start"
+##    cmd+=" ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
+##    cmd+=" --output ${PM2_OUT_LOG}"
+##    cmd+=" --error ${PM2_ERR_LOG}"
+##    cmd+=" --pid ${PID_FILE}"
+##    cmd+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
+
+##    # This may not be needed, or may actually cause a problem.
+##    cd ${APPLICATION_DIRECTORY}
+
+    local retries= retry_limit=${RETRY_LIMIT-1}
+
+    # Fuck.  The env args.
+    for ((retries=0;retries<retry_limit;retries++)) ; do
+        daemon ${START_STOP_DAEMON_ARGS} \
+            "${cmd} 1>>${DAEMON_LOG_FILE} 2>>${DAEMON_LOG_FILE}" 
+
+        sleep ${STOP_RETRY_INTERVAL-3}
+
+        if process_status -q ${args[@]} ; then
+            touch ${lock_file}
+            log_success_msg
+            return 0
+        else
+            rm -f ${pid_file}
+        fi
+    done
+
+    log_failure_msg unable to start ${process_name} after ${retry_limit} tries
+    return 1
+}
+
+# Node.js pm2 specific functions
+# ===
+
+pm2() {
     runuser \
         -s /bin/bash ${PROG_USER} \
         -c "PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
-}
-
-# TODO: can this be done without escalated privileges.
-
-# This is one of the status commands which needs to be wrapped to
-# ensure that the script does not start a daemon on a status check.
-app_list() {
-    local ret_val=0
-    if [ "${UID}" -eq 0 ] ; then
-        # Only perform this when run as root -- otherwise the
-        # standard status is returned.  Also, do not run this
-        # if the daemon has not been started: it will start an
-        # unwanted "God Daemon" on the fly -- unless this is
-        # what is wanted.
-
-        wrapped_pm2 list
-    else
-        ret_val=4
-    fi
-
-    return ${ret_val}
 }
 
 pm2_status() {
     process_status ${@} -p ${PM2_PID_FILE} pm2
 }
 
+pm2_nuke() {
+    # Doing a stop may not be enough if a different user (ie. root)
+    # has invoked just about any pm2 command using the same PM2_HOME.
+    # Non-managed process could be using the same content and, worse,
+    # the content may no longer be writable by the process user.  The
+    # pid files woud have overwritten each other if this has happened.
+    # so there is no help coming tracking them down from that source.
+
+    kill -9 $( ps auwwx | grep -e "PM2.*(${PM2_HOME})" )
+
+    local socks=( $(find ${PM2_HOME}/.pm2 -name '*.sock' ) )
+
+    if [ ${#socks[@]} -gt 0 ] ; then
+        fuser -k ${socks[@]}
+        rm -f ${socks[@]}
+    fi
+   
+    # Assume we are no in a PM2-free world.
+    find ${PM2_HOME} \
+        \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
+        -o -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
+
+}
+
+pm2_stop() {
+    local retries=0 pm2_state=0
+    
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    pm2_status -q -i || pm2_state=${?}
+
+    # This "stop all" is what actually kills the "God Daemon",
+    # I think.  Really don't care about the exit codes and doubt
+    # that they would be usable, any way;
+
+    while [ ${pm2_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
+
+        pm2 stop all || true
+        pm2 kill || true
+        
+        # Sleep time here may be needed.
+        sleep 3
+
+        pm2_status -q -i || pm2_state=${?}
+    done
+
+    if [ ${pm2_state} -ne 0 ] ; then
+        process_stop ${@} || pm2_state=${?}
+    fi
+
+    # There is a _nasty_ cornercase to deal when another user
+    # (ie. root) starts another daemon process using the same
+    # PM2_HOME.  It's _really_ easy to do, and a complete shit
+    # show getting things back into a state where it's usable
+    # by the process user again.  Hack in a check/fix, no matter
+    # the state reported by status check (since it won't know
+    # about all the pids which may be running out of PM2_HOME.
+    pm2_nuke
+
+    process_status ${@} || pm2_state=${?}
+
+    if [ ${pm2_state} -eq 0 ] ; then
+        log_success_msg
+    fi
+
+    return ${pm2_state}
+}
+
+# Node.js functions for apps managed by pm2.
+# ===
+
 app_status() {
     process_status ${@} -p ${PID_FILE} ${PROG}
 }
 
-full_status() {
-    # Status check for the app managed by pm2.
-
+app_list() {
     local ret_val=0
-    local msg=
-    pm2_status ${1} && app_status ${1} || ret_val=${?}
 
-    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
-        if [ ${ret_val} -eq 0 -a ${UID} -eq 0 ] ; then
-            # Do not let non-root status checks return 4.
-            # Also, running the list command when pm2 is
-            # not running will actually silently start the
-            # daemon, which is highly undesirable.
-            app_list
-        fi
+    # Do not do anything if pm2 is not actually running, since
+    # this will cause pm2 to silently start a daemon.
+    if ! pm2_status -q ; then
+        return 1
     fi
-    
-    return ${ret_val}
+
+    if [ "${UID}" -ne 0 ] ; then
+        # Do not perform any pm2 commands without a wrapper --
+        # which will require root access to use runuser.  Just
+        # about any pm2 command run when the daemon is not
+        # actually running will cause pm2 to silentely start
+        # one using whatever the current effective ownership.
+
+        return 4
+    fi
+
+    pm2 list
 }
 
-start() {
+app_stop() {
+
+    local app_state=0 retries=0 retry_limit=${RETRY_LIMIT-3}
+    app_status -q -i || app_state=${?}
+
+    while [ ${app_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
+         pm2 stop ${PROG} || true
+         pm2 delete ${PROG} || true
+
+        app_status -q -i || app_state=${?}
+        ((retries++))
+    done
+
+    if [ ${app_state} -eq 0 ] ; then
+        log_success_msg
+    else
+        process_stop ${@} || app_state=${?}
+    fi
+
+    return ${app_state}
+}
+
+app_start() {
 
     if [ ${UID} -ne 0 ] ; then
         log_failure_msg superuser privileges are required
@@ -305,97 +472,25 @@ start() {
     fi
 }
 
-pm2_nuke() {
-    # Doing a stop may not be enough if a different user (ie. root)
-    # has invoked just about any pm2 command using the same PM2_HOME.
-    # Non-managed process could be using the same content and, worse,
-    # the content may no longer be writable by the process user.  The
-    # pid files woud have overwritten each other if this has happened.
-    # so there is no help coming tracking them down from that source.
+# TODO: do we really want to do this?
+full_status() {
+    # Status check for the app managed by pm2.
 
-    kill -9 $( ps auwwx | grep -e "PM2.*(${PM2_HOME})" )
+    local ret_val=0
+    local msg=
+    pm2_status ${1} && app_status ${1} || ret_val=${?}
 
-    local socks=( $(find ${PM2_HOME}/.pm2 -name '*.sock' ) )
-
-    if [ ${#socks[@]} -gt 0 ] ; then
-        fuser -k ${socks[@]}
-        rm -f ${socks[@]}
+    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
+        if [ ${ret_val} -eq 0 -a ${UID} -eq 0 ] ; then
+            # Do not let non-root status checks return 4.
+            # Also, running the list command when pm2 is
+            # not running will actually silently start the
+            # daemon, which is highly undesirable.
+            app_list
+        fi
     fi
-   
-    # Assume we are no in a PM2-free world.
-    find ${PM2_HOME} \
-        \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
-        -o -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
-
-}
-
-pm2_stop() {
-    local retries=0 pm2_state=0
     
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
-        return 4
-    fi
-
-    pm2_status -q -i || pm2_state=${?}
-
-    # This "stop all" is what actually kills the "God Daemon",
-    # I think.  Really don't care about the exit codes and doubt
-    # that they would be usable, any way;
-
-    while [ ${pm2_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
-
-        wrapped_pm2 stop all || true
-        wrapped_pm2 kill || true
-        
-        # Sleep time here may be needed.
-        sleep 3
-
-        pm2_status -q -i || pm2_state=${?}
-    done
-
-    if [ ${pm2_state} -ne 0 ] ; then
-        process_stop ${@} || pm2_state=${?}
-    fi
-
-    # There is a _nasty_ cornercase to deal when another user
-    # (ie. root) starts another daemon process using the same
-    # PM2_HOME.  It's _really_ easy to do, and a complete shit
-    # show getting things back into a state where it's usable
-    # by the process user again.  Hack in a check/fix, no matter
-    # the state reported by status check (since it won't know
-    # about all the pids which may be running out of PM2_HOME.
-    pm2_nuke
-
-    process_status ${@} || pm2_state=${?}
-
-    if [ ${pm2_state} -eq 0 ] ; then
-        log_success_msg
-    fi
-
-    return ${pm2_state}
-}
-
-app_stop() {
-
-    local app_state=0 retries=0 retry_limit=${RETRY_LIMIT-3}
-    app_status -q -i || app_state=${?}
-
-    while [ ${app_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
-         wrapped_pm2 stop ${PROG} || true
-         wrapped_pm2 delete ${PROG} || true
-
-        app_status -q -i || app_state=${?}
-        ((retries++))
-    done
-
-    if [ ${app_state} -eq 0 ] ; then
-        log_success_msg
-    else
-        process_stop ${@} || app_state=${?}
-    fi
-
-    return ${app_state}
+    return ${ret_val}
 }
 
 full_stop() {
@@ -410,7 +505,7 @@ reload() {
     fi
 
     local ret_val=0
-    local msg="$( wrapped_pm2 reload all 2>&1 )" \
+    local msg="$( pm2 reload all 2>&1 )" \
         || ret_val=${?}
 
     if [ ${ret_val} -eq 0 ] ; then
