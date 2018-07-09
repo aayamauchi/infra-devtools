@@ -61,18 +61,18 @@ process_status() {
 
 process_state_code() {
     # It is so annoying when checking for status codes and having to
-    # worry about bullet-proofing everythign in case of ERR traps.
+    # worry about bullet-proofing everything in case of ERR traps.
 
     process_status -q ${@} && echo 0 || echo ${?}
 
 }
 
 process_stop() {
-    # A stop function with stale pid and lock file autoclearing,
-    # retries, and a sigkill if everything else fails.
+    # Add stale pid and lock file autoclearing, retries, and
+    # a brute-force sigkill as a last resort.
 
     local process_state=0
-    local retry_limit=${RETRY_LIMIT-3} retries=0
+    local retries=0
 
     local args=(${@})
     local pid_file= lock_file= lock_file_name= process_name=
@@ -92,8 +92,8 @@ process_stop() {
     process_name=${1}
    
     process_state=$( process_state_code -i ${args[@]} )
- 
-    while [ ${retries} -lt ${retry_limit} ] ; do
+
+    for ((retries=0;retries<=${STOP_RETRY_MAX-${retries}};retries++)) ; do
 
         # Remove stale pid or lock files.
         if [ ${process_state} -gt 0 ] ; then
@@ -101,6 +101,7 @@ process_stop() {
                 rm -f ${pid_file} /var/lock/subsys/${lock_file}
             else
                 stop ${@}
+                sleep ${STOP_RETRY_WAIT}
             fi
             process_state=$( process_state_code -i ${@} )
         fi
@@ -113,7 +114,6 @@ process_stop() {
 
         [ ${process_state} -ne 0 ] || break
 
-        ((retries++))
     done
 
     if [ ${process_state} -eq 0 ] ; then
@@ -144,8 +144,9 @@ process_stop() {
 }
 
 process_start() {
-    # A generic function to start a process using the initscript daemon
-    # function.  Add in some retry logic and wait times for status checks.
+    # Extending to add retries and delays for status checks after start,
+    # as well as auto-clearing stale pid and lock files.  Also implement
+    # any specified ulimit settings.
 
     local args=("${@}")
     local process_name= pid_file= lock_file=
@@ -186,12 +187,12 @@ process_start() {
 
     [ -z "${ULIMIT_OPTS}" ] || ulimit ${ULIMIT_OPTS} &>/dev/null
 
-    local retries= retry_limit=${RETRY_LIMIT-1}
+    local retries=
 
-    for ((retries=0;retries<retry_limit;retries++)) ; do
+    for ((retries=0;retries<=${START_RETRY_MAX-${retries}};retries++)) ; do
         daemon ${START_STOP_DAEMON_ARGS} "${PROG_START_COMMAND}"
 
-        sleep ${STOP_RETRY_INTERVAL-3}
+        sleep ${START_RETRY_WAIT}
 
         if process_status -q ${args[@]} ; then
             touch /var/lock/subsys/${lock_file}
@@ -207,10 +208,14 @@ process_start() {
 }
 
 assert_prog() {
+    # Assert/check that a "prog_" function is defined.
+
     printf -- '%s\n' "${PROG_COMMANDS[@]}" | grep -q "${1}"
 }
 
 assert_lsb() {
+    # Assert/check that all LSB required functionality is implemented.
+
     local a= msg=
 
     for a in start stop restart force-reload status ; do
@@ -230,11 +235,14 @@ assert_lsb() {
 }
 
 assert_privileges() {
+    # Assert/check that effective user has sufficient permissions
+    # to run the daemon command as the application user.
+
    daemon --user ${PROG_USER} /bin/true &>/dev/null
 }
 
-# Functions accessed directly by the script for actions..  The "prog_"
-# prefix is required in order to show up in the usage text.
+# Functions accessed directly by the script to implement actions.  The
+# "prog_" prefix is required in order to work with the "assert_" functions.
 # ===
 
 prog_usage() {
@@ -251,6 +259,11 @@ prog_status() {
 }
 
 prog_stop() {
+
+    # This is not ideal, but trying to keep this generic.
+    export PROG_USER PROG_GROUP PROG_NAME \
+        STOP_RETRY_MAX STOP_RETRY_WAIT
+
     process_stop \
         "${@}" \
         ${PID_FILE+-p }${PID_FILE} \
@@ -258,7 +271,13 @@ prog_stop() {
 }
 
 prog_start() {
-    export PROG_START_COMMAND PROG_USER PROG_GROUP
+
+    # This is not ideal, but trying to keep this generic.
+    export PROG_USER PROG_GROUP PROG_NAME \
+        START_RETRY_MAX START_RETRY_WAIT \
+        PROG_START_COMMAND \
+        ULIMIT_OPTS
+
     process_start \
         ${PID_FILE+-p }${PID_FILE} \
         ${LOCK_FILE+-l }${LOCK_FILE} \
@@ -324,6 +343,9 @@ prog_stop() {
 # The LOCK_FILE must be relative to /var/lock/subsys/.
 : ${LOCK_FILE:=${PROG_NAME}}
 
+# Implementation-specific details must be sourced or pasted in, here.
+# Anything defined up to this point is a default and can be overridden.
+# ===
 if [ -r /etc/sysconfig/${PROG_NAME} ] ; then
     source /etc/sysconfig/${PROG_NAME}
 fi
@@ -337,26 +359,24 @@ if ! { declare -p PROG_COMMANDS 2>/dev/null | grep -qe '^declare -a' ; } ; then
 fi
 
 : ${LOG_PATH:=/var/log/${PROG_NAME}}
-
-# TODO: make sure this is actually getting set in the subshell.
 : ${ULIMIT_OPTS:='-n 64000 -u 64000'}
 
-# TODO: need to standardize the retry parameters.
-: ${STOP_RETRY_INTERVAL:=3}
+: ${START_RETRY_WAIT:=3}
+[[ ${START_RETRY_MAX} =~ ^[[:digit:]] ]] || unset START_RETRY_MAX
 
-# By default, the max number of stop retry attempts is unlimited.
+: ${STOP_RETRY_WAIT:=3}
 [[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
 
 START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG_NAME}"
 
 # Assert that required LSB functionality has been implemented before
-# going any further.
+# going any further, since it'd be somewhat pointless to continue.
 assert_lsb || exit ${?}
 
 exit_val=0
 case "${1}" in
     start|stop|restart|force-reload|status)
-        # Required by LSB and definitions have already been asserted.
+        # This is LSB required functionality.
         if [ ! ${1} == status ] ; then
             printf '%s %s: ' \
                 $( echo "${1}" | sed -e 's/p$/pp/;s/.*/\u&ing/' ) \
