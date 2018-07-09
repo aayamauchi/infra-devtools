@@ -98,7 +98,7 @@ process_stop() {
         # Remove stale pid or lock files.
         if [ ${process_state} -gt 0 ] ; then
             if [ ${process_state} -le 2 ] ; then
-                rm -f ${pid_file} /var/lock/subsys/${lock_file}
+                rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
             else
                 stop ${@}
                 sleep ${STOP_RETRY_WAIT}
@@ -129,7 +129,7 @@ process_stop() {
         process_state=$( process_state_code -i ${@} )
 
         if [[ ${process_state} =~ ^[12]$ ]] ; then
-            rm -f ${pid_file} /var/lock/subsys/${lock_file}
+            rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
             process_state=$( process_state_code -i ${@} )
         fi
 
@@ -181,7 +181,7 @@ process_start() {
         ;;
         [12])
             # Try clearing pid or lock files and hope for the best.
-            rm -f ${pid_file} /var/lock/subsys/${lock_file}
+            rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
         ;;
     esac
 
@@ -195,7 +195,7 @@ process_start() {
         sleep ${START_RETRY_WAIT}
 
         if process_status -q ${args[@]} ; then
-            touch /var/lock/subsys/${lock_file}
+            [ -z "${lock_file}" ] || touch /var/lock/subsys/${lock_file}
             log_success_msg
             return 0
         else
@@ -358,7 +358,6 @@ if ! { declare -p PROG_COMMANDS 2>/dev/null | grep -qe '^declare -a' ; } ; then
     fi
 fi
 
-: ${LOG_PATH:=/var/log/${PROG_NAME}}
 : ${ULIMIT_OPTS:='-n 64000 -u 64000'}
 
 : ${START_RETRY_WAIT:=3}
