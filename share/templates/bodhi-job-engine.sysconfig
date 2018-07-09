@@ -1,29 +1,17 @@
-# Even though these are used by pm2, it's merely to describe
-# this application. If pm2 were broken out separatetly, these
-# would be parameters passwd to pm2 to specify which app is
-# the command applies to.
+# We'll have to define PROG shit here.
+
+# These are passed to pm2, but they are for managing a specific app.
 : ${APPLICATION_DIRECTORY:=${PROG_HOME}}
 : ${APPLICATION_START:=index.js}
 
 # pm2 enviroment variables
 # ===
 
-# PM2_HOME is actually used by pm2.  The rest are helpers
-# used by this script.
-: ${PM2_HOME:=/var/run/${PROG}/.pm2}
+# PM2_HOME is actually used by pm2.  This is the controllwing daemon
+# "home", not the application "home".
+: ${PM2_HOME:=/var/run/${PROG_NAME}/.pm2}
 : ${PM2_CMD:="$( which --skip-alias pm2 )"}
 : ${PM2_PID_FILE:=${PM2_HOME}/pm2.pid}
-
-# TODO -- fully debug this, or remove it.
-# What was I doing here?
-# Generally do not want the pm2 process console outputs.
-if [ -d "${PM2_LOG_PATH}" ] ; then
-    PM2_OUT_LOG=${PM2_LOG_PATH}/pm2-${PROG}.out
-    PM2_ERR_LOG=${PM2_LOG_PATH}/pm2-${PROG}.err
-else
-    PM2_OUT_LOG=/dev/null
-    PM2_ERR_LOG=/dev/null
-fi
 
 # Node.js pm2 specific functions
 # ===
@@ -31,7 +19,7 @@ fi
 pm2() {
     runuser \
         -s /bin/bash ${PROG_USER} \
-        -c "PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
+        -c "cd ${PM2_HOME} ; PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
 }
 
 pm2_status() {
@@ -41,79 +29,79 @@ pm2_status() {
 pm2_nuke() {
     # Doing a stop may not be enough if a different user (ie. root)
     # has invoked just about any pm2 command using the same PM2_HOME.
-    # Non-managed process could be using the same content and, worse,
-    # the content may no longer be writable by the process user.  The
-    # pid files woud have overwritten each other if this has happened.
-    # so there is no help coming tracking them down from that source.
+    # This is required to ensure that processes started outside of
+    # this script with the same PM2_HOME are actually killed.
 
-    kill -9 $( ps auwwx | grep -e "PM2.*(${PM2_HOME})" )
-
-    local socks=( $(find ${PM2_HOME}/.pm2 -name '*.sock' ) )
+    local socks=( $( find ${PM2_HOME} -name '*.sock' ) )
 
     if [ ${#socks[@]} -gt 0 ] ; then
+        # TODO: loop this?  At least capture on error and bullet-proof.
         fuser -k ${socks[@]}
         rm -f ${socks[@]}
     fi
    
-    # Assume we are no in a PM2-free world.
+    # Assume we are no in a PM2-free world.  Make sure anything which
+    # may have been chowned in PM2_HOME is owned by the process user.
     find ${PM2_HOME} \
-        \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
-        -o -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
+        ! \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
+        -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
 
+    # TODO; bullet-proof and make a sensible return code
 }
 
 pm2_stop() {
-    local retries=0 pm2_state=0
+    local retries=0 pm2_state=0 retry_limit=${RETRY_LIMIT=3}
     
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
         return 4
     fi
 
     pm2_status -q -i || pm2_state=${?}
 
-    # This "stop all" is what actually kills the "God Daemon",
-    # I think.  Really don't care about the exit codes and doubt
-    # that they would be usable, any way;
+    sleep ${STOP_RETRY_INTERVAL-3}
 
     while [ ${pm2_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
 
-        pm2 stop all || true
         pm2 kill || true
         
-        # Sleep time here may be needed.
-        sleep 3
+        #sleep ${STOP_RETRY_INTERVAL-3}
 
-        pm2_status -q -i || pm2_state=${?}
+        # Explicitly protect this from folks who love run error traps.
+        pm2_status -q -i && pm2_state=0 || pm2_state=${?}
+        ((retries++))
     done
 
-    if [ ${pm2_state} -ne 0 ] ; then
-        process_stop ${@} || pm2_state=${?}
+    if [ ${pm2_state} -gt 2 ] ; then
+        process_stop -p ${PM2_PID_FILE} pm2 || true
     fi
 
-    # There is a _nasty_ cornercase to deal when another user
-    # (ie. root) starts another daemon process using the same
-    # PM2_HOME.  It's _really_ easy to do, and a complete shit
-    # show getting things back into a state where it's usable
-    # by the process user again.  Hack in a check/fix, no matter
-    # the state reported by status check (since it won't know
-    # about all the pids which may be running out of PM2_HOME.
-    pm2_nuke
+    pm2_status -q -i && pm2_state=0 || pm2_state=${?}
 
-    process_status ${@} || pm2_state=${?}
+    if [[ ${pm2_state} -lt 3 ]] ; then
+        rm -f ${PM2_PID_FILE}
+        pm2_state=0
+    fi
 
     if [ ${pm2_state} -eq 0 ] ; then
         log_success_msg
     fi
 
+    # TODO: we need to do soemthing about the return value here.
+    pm2_nuke
+
     return ${pm2_state}
 }
 
-# Node.js functions for apps managed by pm2.
+# Node.js functions for apps managed by the pm2 daemon.
 # ===
 
 app_status() {
-    process_status ${@} -p ${PID_FILE} ${PROG}
+    process_status ${@} -p ${PID_FILE} -l ${LOCK_FILE} ${PROG_NAME}
+}
+
+app_state_code() {
+    app_status -q ${@} && echo 0 || echo ${?}
 }
 
 app_list() {
@@ -121,16 +109,16 @@ app_list() {
 
     # Do not do anything if pm2 is not actually running, since
     # this will cause pm2 to silently start a daemon.
-    if ! pm2_status -q ; then
+    if pm2_status -q -i ; then
         return 1
     fi
 
-    if [ "${UID}" -ne 0 ] ; then
+    if ! assert_privileges ; then
         # Do not perform any pm2 commands without a wrapper --
         # which will require root access to use runuser.  Just
         # about any pm2 command run when the daemon is not
         # actually running will cause pm2 to silentely start
-        # one using whatever the current effective ownership.
+        # one using the current effective user.
 
         return 4
     fi
@@ -141,90 +129,55 @@ app_list() {
 app_stop() {
 
     local app_state=0 retries=0 retry_limit=${RETRY_LIMIT-3}
-    app_status -q -i || app_state=${?}
+    app_state=$( app_state_code -i )
 
     while [ ${app_state} -gt 2 -a ${retries} -lt ${retry_limit} ] ; do
-         pm2 stop ${PROG} || true
-         pm2 delete ${PROG} || true
+        # if this is not explicitly named in the startup, this will be
+        # the name of js file used to start the daemon.
+        pm2 stop ${PROG_NAME} || true
+        pm2 delete ${PROG_NAME} || true
 
-        app_status -q -i || app_state=${?}
+        app_state=$( app_state_code -i )
         ((retries++))
     done
+
+    if [ ${app_state} -lt 3 ] ; then
+        rm -f ${PID_FILE} /var/lock/subsys/${LOCK_FILE}
+        app_state=0
+    fi
+
+    if [ ${app_state} -ne 0 ] ; then
+        process_stop -p ${PID_FILE} -l ${LOCK_FILE} || true
+        app_state=$( app_state_code -i )
+    fi
 
     if [ ${app_state} -eq 0 ] ; then
         log_success_msg
     else
-        process_stop ${@} || app_state=${?}
+        log_failure_msg unable to stop application normally
     fi
 
     return ${app_state}
 }
 
-app_start() {
-
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
+prog_stop() {
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
         return 4
     fi
-
-    local current_state=0
-    full_status -q || current_state=${?}
-    case "${current_state}" in
-        0)
-            log_success_msg "${PROG} is already running"
-            return 0
-        ;;
-        [12])
-            # Try clearing pid and lock files and hope for the best.
-            rm -f ${PID_FILE} ${LOCK_FILE}
-        ;;
-    esac
-
-    ulimit ${ULIMIT_OPTS} &>/dev/null || true
-
-    local cmd="PM2_HOME=${PM2_HOME} USER=${PROG_USER} ${PM2_CMD} start"
-    cmd+=" ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
-    cmd+=" --output ${PM2_OUT_LOG}"
-    cmd+=" --error ${PM2_ERR_LOG}"
-    cmd+=" --pid ${PID_FILE}"
-    cmd+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
-
-    # This may not be needed, or may actually cause a problem.
-    cd ${APPLICATION_DIRECTORY}
-
-    daemon ${START_STOP_DAEMON_ARGS} \
-        "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err"
-
-    sleep ${STOP_RETRY_INTERVAL}
-
-    # REALLY stupid.  If we don't query pm2 using the app user and
-    # someone uses a root sudo, the sockets will end up being owned
-    # by a different user.
-    if app_status -q ; then
-        touch ${LOCK_FILE}
-        log_success_msg
-        return 0
-    else
-        rm -f ${PID_FILE}
-        log_failure_msg unable to start ${PROG}
-        return 1
-    fi
+    app_stop || true
+    pm2_stop
 }
-
-prog_stop() {
-    app_stop && pm2_stop
-}
-
 
 prog_reload() {
 
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
         return 4
     fi
 
     local ret_val=0
-    local msg="$( pm2 reload all 2>&1 )" \
+    local msg="$( pm2 reload ${PROG_NAME} 2>&1 )" \
         || ret_val=${?}
 
     if [ ${ret_val} -eq 0 ] ; then
@@ -237,3 +190,31 @@ prog_reload() {
 
     return ${ret_val}
 }
+
+prog_status() {
+    local ret_val=0
+    app_status "${@}" || ret_val=${?}
+
+    [[ "${*}" =~ -q ]] || app_list "${@}" || true
+
+    return ${ret_val}
+}
+    
+
+PID_FILE_NAME=${PROG_NAME}
+PID_FILE_PATH=${PM2_HOME}/pids
+PID_FILE=${PID_FILE_PATH}/${PID_FILE_NAME}
+
+#        super $PM2 start $APPLICATION_DIRECTORY/$APPLICATION_START --output $LOGFILE --error $LOGFILE --pid $PIDFILE --interpreter=$APPLICATION_DIRECTORY/node/bin/node
+# Can't do this using a function.
+# WTF?
+#PROG_START_COMMAND="PM2_HOME=${PM2_HOME} ${PM2_CMD}"
+PROG_START_COMMAND="cd ${APPLICATION_DIRECTORY} ; PM2_HOME=${PM2_HOME} ${PM2_CMD}"
+PROG_START_COMMAND+=" start ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
+# If we do not do this, the app is named "index".
+PROG_START_COMMAND+=" --name ${PROG_NAME}"
+PROG_START_COMMAND+=" --output /var/log/bodhi-job-engine/bodhi-job-engine.log"
+PROG_START_COMMAND+=" --error /var/log/bodhi-job-engine/bodhi-job-engine.log"
+PROG_START_COMMAND+=" --pid ${PID_FILE}"
+PROG_START_COMMAND+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
+PROG_START_COMMAND="{ ${PROG_START_COMMAND} ; } &>/dev/null"
