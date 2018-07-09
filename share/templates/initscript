@@ -1,6 +1,6 @@
 #!/bin/bash
-# chkconfig:   2345 98 2
-# description: generic initscript wrapper
+# chkconfig:   2345 98 02
+# description: generic initscript
 # processname: processname
 #
 ### BEGIN INIT INFO
@@ -18,17 +18,14 @@
 source /etc/init.d/functions
 source /lib/lsb/init-functions
 
-# Everything here really should be in a lib, but no way to
-# impleement it and have it available on a system.
-
-# Generic extensions of the initscript functions.
+# Generic extensions of standard initscript functions.
 # ===
 
 process_status() {
-
     # A status function which allows for silent operation as well
     # as allowing inverting return codes 0 and 3 to make life
-    # easier when stopping a process, where 0 is the desired state.
+    # easier when stopping a process, where the desired state
+    # is actually stopped, not running.
 
     local ret_val=0
 
@@ -36,15 +33,20 @@ process_status() {
         case ${1} in
         -q|--quiet)
             local quiet=true
+            shift
         ;;
         -i|--invert)
             local invert=true
+            shift
         ;;
         esac
-        shift
     done
 
     msg="$( status ${@} )" || ret_val=${?}
+
+    if [ -n "${invert+set}" ] ; then
+        ret_val=$( echo ${ret_val} | tr 03 30 )
+    fi
 
     if [ -z "${quiet+set}" ] ; then
         if [ ${ret_val} -eq 0 ] ; then
@@ -54,15 +56,18 @@ process_status() {
         fi
     fi
 
-    if [ -n "${invert+set}" ] ; then
-        ret_val=$( echo ${ret_val} | tr 03 30 )
-    fi
-
     return ${ret_val}
 }
 
-process_stop() {
+process_state_code() {
+    # It is so annoying when checking for status codes and having to
+    # worry about bullet-proofing everythign in case of ERR traps.
 
+    process_status -q ${@} && echo 0 || echo ${?}
+
+}
+
+process_stop() {
     # A stop function with stale pid and lock file autoclearing,
     # retries, and a sigkill if everything else fails.
 
@@ -70,43 +75,39 @@ process_stop() {
     local retry_limit=${RETRY_LIMIT-3} retries=0
 
     local args=(${@})
-    local pid_file= lock_file= process_name=
+    local pid_file= lock_file= lock_file_name= process_name=
 
-    while [ ${#} -gt 0 ] ; do
-        if [ ${#} -eq 1 ] ; then
-            process_name=${1}
-            shift
-            break
-        fi
+    while [ ${#} -gt 1 ] ; do
         case ${1} in
         -p)
-            shift
-            pid_file=${1}
+            pid_file=${2}
+            shift 2
         ;;
         -l)
-            shift
-            lock_file=${1}
+            lock_file=${2}
+            shift 2
         ;;
         esac
-        shift
     done
-    process_status -q -i ${args[@]} || process_state=${?}
+    process_name=${1}
+   
+    process_state=$( process_state_code -i ${args[@]} )
  
     while [ ${retries} -lt ${retry_limit} ] ; do
 
         # Remove stale pid or lock files.
         if [ ${process_state} -gt 0 ] ; then
             if [ ${process_state} -le 2 ] ; then
-                rm -f ${pid_file} ${lock_file}
+                rm -f ${pid_file} /var/lock/subsys/${lock_file}
             else
                 stop ${@}
             fi
-            process_status -q -i ${@} || process_state=${?}
+            process_state=$( process_state_code -i ${@} )
         fi
 
         if [ ${process_state} -eq 4 ] ; then
             # There is no resean to continue if this is permissions problem.
-            log_failure_msg insufficient privilege to stop process
+            log_failure_msg insufficient privileges
             return 4
         fi
 
@@ -118,19 +119,18 @@ process_stop() {
     if [ ${process_state} -eq 0 ] ; then
         log_success_msg
     else
-        # Fuck.  If the pid file is there, need to use it.
         log_failure_msg "max retries (${retry_limit}) exceeeded, performing sigkill"
         if [ -n "${pid_file}" ] ; then
             kill -9 $(< ${pid_file} )
         else
-            killall -9 -u ${PROG_USER}
+            killall -u ${PROG_USER}
         fi
 
-        process_status -q -i ${@} || process_state=${?}
+        process_state=$( process_state_code -i ${@} )
 
         if [[ ${process_state} =~ ^[12]$ ]] ; then
-            rm -f ${pid_file} ${lock_file}
-            process_status -q -i ${@} || process_state=${?}
+            rm -f ${pid_file} /var/lock/subsys/${lock_file}
+            process_state=$( process_state_code -i ${@} )
         fi
 
         if [ ${process_state} -eq 0 ] ; then
@@ -144,76 +144,57 @@ process_stop() {
 }
 
 process_start() {
-
-    # Generic function to start a process using the initscript daemon function.
+    # A generic function to start a process using the initscript daemon
+    # function.  Add in some retry logic and wait times for status checks.
 
     local args=("${@}")
     local process_name= pid_file= lock_file=
 
-    while [ ${#} -gt 0 ] ; do
-        if [ ${#} -eq 1 ] ; then
-            process_name=${1}
-            shift
-            break
-        fi
+    while [ ${#} -gt 1 ] ; do
         case "${1}" in
         -p)
-            shift
-            pid_file=${1}
+            pid_file=${2}
+            shift 2
         ;;
         -l)
-            shift
-            lock_file=${1}
+            lock_file=${2}
+            shift 2
         ;;
         esac
     done
-        
-    # TODO -- make this part of the daemon function return.
-    if [ ${UID} -ne 0 ] ; then
-        log_failure_msg superuser privileges are required
+    process_name=${1}
+   
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
         return 4
     fi
 
     local current_state=0
-    # Subclass this?
-    process_status -q ${args[@]} || process_state=${?}
+    
+    process_state=$( process_state_code ${args[@]} )
 
     case "${process_state}" in
         0)
-            log_success_msg "${PROG} is already running"
+            log_success_msg "${process_name} is already running"
             return 0
         ;;
         [12])
-            # Try clearing pid and lock files and hope for the best.
-            rm -f ${PID_FILE} ${LOCK_FILE}
+            # Try clearing pid or lock files and hope for the best.
+            rm -f ${pid_file} /var/lock/subsys/${lock_file}
         ;;
     esac
 
-    ulimit ${ULIMIT_OPTS} &>/dev/null || true
-
-    # TODO: check this earlier and throw an error if required envs are not set.
-    local cmd=${PROG_CMD}
-##    local cmd="PM2_HOME=${PM2_HOME} USER=${PROG_USER} ${PM2_CMD} start"
-##    cmd+=" ${APPLICATION_DIRECTORY}/${APPLICATION_START}"
-##    cmd+=" --output ${PM2_OUT_LOG}"
-##    cmd+=" --error ${PM2_ERR_LOG}"
-##    cmd+=" --pid ${PID_FILE}"
-##    cmd+=" --interpreter=${APPLICATION_DIRECTORY}/node/bin/node"
-
-##    # This may not be needed, or may actually cause a problem.
-##    cd ${APPLICATION_DIRECTORY}
+    [ -z "${ULIMIT_OPTS}" ] || ulimit ${ULIMIT_OPTS} &>/dev/null
 
     local retries= retry_limit=${RETRY_LIMIT-1}
 
-    # Fuck.  The env args.
     for ((retries=0;retries<retry_limit;retries++)) ; do
-        daemon ${START_STOP_DAEMON_ARGS} \
-            "${cmd} 1>>${DAEMON_LOG_FILE} 2>>${DAEMON_LOG_FILE}" 
+        daemon ${START_STOP_DAEMON_ARGS} "${PROG_START_COMMAND}"
 
         sleep ${STOP_RETRY_INTERVAL-3}
 
         if process_status -q ${args[@]} ; then
-            touch ${lock_file}
+            touch /var/lock/subsys/${lock_file}
             log_success_msg
             return 0
         else
@@ -225,38 +206,99 @@ process_start() {
     return 1
 }
 
-prog_defined() {
+assert_prog() {
     printf -- '%s\n' "${PROG_COMMANDS[@]}" | grep -q "${1}"
 }
 
+assert_lsb() {
+    local a= msg=
+
+    for a in start stop restart force-reload status ; do
+        if ! assert_prog ${a} ; then
+            msg+="'${a}' "
+        fi
+    done
+
+    if [ ${#msg} -gt 0 ] ; then
+        if [[ ${msg} =~ '[^ ] [^ ]' ]] ; then
+            printf 'required LSB actions %sare undefined\n' "${msg}"
+        else
+            printf 'required LSB action %sis undefined\n' "${msg}"
+        fi
+        return 3
+    fi
+}
+
+assert_privileges() {
+   daemon --user ${PROG_USER} /bin/true &>/dev/null
+}
+
+# Functions accessed directly by the script for actions..  The "prog_"
+# prefix is required in order to show up in the usage text.
+# ===
+
 prog_usage() {
-    printf -- 'Usage: %s <' ${PROG}
-    printf -- '%s|' ${PROG_COMMANDS[@]} | sed -e 's/|$/>/'
+    printf -- 'Usage: %s {' ${PROG_NAME}
+    printf -- '%s|' ${PROG_COMMANDS[@]} | sed -e 's/|$/}/'
     echo
 }
 
-: ${PROG:=${0##*/}}
-
-# These have to be overridable.
-# TODO: do we really want to do this?
 prog_status() {
-    # Status check for the app managed by pm2.
+    process_status \
+        "${@}" \
+        ${PID_FILE+-p }${PID_FILE} \
+        ${LOCK_FILE+-l }${LOCK_FILE}
+}
 
-    local ret_val=0
-    local msg=
-    pm2_status ${1} && app_status ${1} || ret_val=${?}
+prog_stop() {
+    process_stop \
+        "${@}" \
+        ${PID_FILE+-p }${PID_FILE} \
+        ${LOCK_FILE+-l }${LOCK_FILE}
+}
 
-    if [[ ! ${1} =~ ^(-q|--quiet)$ ]] ; then
-        if [ ${ret_val} -eq 0 -a ${UID} -eq 0 ] ; then
-            # Do not let non-root status checks return 4.
-            # Also, running the list command when pm2 is
-            # not running will actually silently start the
-            # daemon, which is highly undesirable.
-            app_list
-        fi
+prog_start() {
+    export PROG_START_COMMAND PROG_USER PROG_GROUP
+    process_start \
+        ${PID_FILE+-p }${PID_FILE} \
+        ${LOCK_FILE+-l }${LOCK_FILE} \
+        ${PROG_NAME}
+}
+
+prog_restart() {
+    local ret_val=0 msg=
+    echo -n $"Stopping ${PROG_NAME}: "
+    msg="$( prog_stop )" || ret_val=${?}
+    if [ ${ret_val} -eq 0 ] ; then
+        printf '— %s, starting %s' "${msg}" ${PROG_NAME}
+        prog_start || ret_val=${?}
+    else
+        log_failure_msg "${msg}"
     fi
-    
+
     return ${ret_val}
+}
+
+prog_try-restart() {
+    if ! prog_status -q "${@}" ; then
+        log_failure_msg ${PROG_NAME} is not running
+    else
+        prog_restart
+    fi
+}
+
+prog_force-reload() {
+    # This is required by LSB and should behave as follows.
+    if prog_status -q "${@}" ; then
+        if assert_prog reload ; then
+            prog_reload "${@}"
+        else 
+            prog_restart "${@}"
+        fi
+    else
+        log_failure_msg ${PROG_NAME} is not running
+        return 7
+    fi
 }
 
 prog_stop() {
@@ -264,152 +306,85 @@ prog_stop() {
     process_stop
 }
 
-if [ -r /etc/sysconfig/${PROG} ] ; then
-    source /etc/sysconfig/${PROG}
-fi
-
-# Standard variables which must be set for this script to work
+# Start of the actual script.
 # ===
-: ${PROG_USER:=${PROG}}
+
+# Environment variables which must be set for this script to work
+# ===
+
+: ${PROG_NAME:=${0##*/}}
+: ${PROG_USER:=${PROG_NAME}}
 : ${PROG_GROUP:=${PROG_USER}}
 : ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+
+: ${PID_FILE_PATH:=/var/run/${PROG_NAME}}
+: ${PID_FILE_NAME:=${PROG_NAME}.pid}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
+
+# The LOCK_FILE must be relative to /var/lock/subsys/.
+: ${LOCK_FILE:=${PROG_NAME}}
+
+if [ -r /etc/sysconfig/${PROG_NAME} ] ; then
+    source /etc/sysconfig/${PROG_NAME}
+fi
 
 if ! { declare -p PROG_COMMANDS 2>/dev/null | grep -qe '^declare -a' ; } ; then
     if [ -n "${PROG_COMMANDS+set}" ] ; then
         PROG_COMMANDS=( ${PROG_COMMANDS} )
     else
-        ${PROG_COMMANDS=($( declare -F | sed -sne '/[[:space:]]prog_/ {s/.*prog_/a;p}' | sort ))}
+        PROG_COMMANDS=($( declare -F | sed -sne '/[[:space:]]prog_/ {s/.*prog_//;p}' | sort ))
     fi
 fi
 
-# TODO: yikes.  More shit to standardize/convert.
+: ${LOG_PATH:=/var/log/${PROG_NAME}}
 
-# This is for the daemon command -- not pm2 or the application
-: ${LOG_PATH:=/var/log/${PROG}}
+# TODO: make sure this is actually getting set in the subshell.
+: ${ULIMIT_OPTS:='-n 64000 -u 64000'}
 
+# TODO: need to standardize the retry parameters.
 : ${STOP_RETRY_INTERVAL:=3}
+
 # By default, the max number of stop retry attempts is unlimited.
 [[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
 
-: ${PID_FILE_PATH:=${PM2_HOME}/pids}
-: ${PID_FILE_NAME:=${PROG}}
-: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
-: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG_NAME}"
 
-START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG}"
-
-# This is what is currently set as the default.
-: ${ULIMIT_OPTS:='-n 64000 -u 64000'}
-
+# Assert that required LSB functionality has been implemented before
+# going any further.
+assert_lsb || exit ${?}
 
 exit_val=0
 case "${1}" in
-    start)
-        echo -n $"Starting ${PROG}: "
-        if printf -- '%s\n' "${PROG_COMMANDS[@]}" | grep -q start ; then
-            prog_start || exit_val=${?}
-        else
-            log_failure_msg "unimplemented function 'prog_start'"
-            exit_val=3
+    start|stop|restart|force-reload|status)
+        # Required by LSB and definitions have already been asserted.
+        if [ ! ${1} == status ] ; then
+            printf '%s %s: ' \
+                $( echo "${1}" | sed -e 's/p$/pp/;s/.*/\u&ing/' ) \
+                ${PROG_NAME}
         fi
+        prog_${1} || exit_val=${?}
     ;;
-    stop)
-        echo -n $"Stopping ${PROG}: "
-        if function_defined prog_stop ; then
-            prog_stop || exit_val=${?}
-        else
-            log_failure_msg "unimplemented function 'prog_stop'"
-            exit_val=3
-        fi
-    ;;
-    restart)
-        # Not ideal, but if a separate restart function exists, use it.
-        if function_defined prog_restart ; then
-            echo -n $"Restarting ${PROG}"
-            prog_restart || exit_val=${?}
-        else
-            echo -n $"Stopping ${PROG}: "
-            if function_defined prog_stop ; then
-                prog_stop || exit_val=${?}
-            else
-                log_failure_msg "unimplemented function 'prog_stop'"
-                exit_val=3
-            fi
-            if [ ${exit_val} -eq 0 ] ; then
-                echo -n $"Starting ${PROG}: "
-                if function_defined prog_start ; then
-                    prog_start || exit_val=${?}
-                else
-                    log_failure_msg "unimplemented function 'prog_start'"
-                    exit_val=3
-                fi
-            fi
-        fi
-    ;;
-    reload|force-reload)
-        echo -n $"Reloading ${PROG}"
-        if function_defined prog_reload ; then
-            prog_reload || exit_val=${?}
-        else
-            log_failure_msg "unimplemented function 'prog_reload'"
-            exit_val=3
-        fi
-        ;;
-    status)
-        if function_defined prog_status ; then
-            prog_status || exit_val=${?}
-        else
-            log_failure_msg "unimplemented function 'prog_status'"
-            exit_val=4
-        fi
-        ;;
-    try-restart|condrestart)
-        if function_defined prog_status ; then
-            if prog_status -q ; then
-                if function_defined prog_restart ; then
-                    echo -n $"Restarting ${PROG}"
-                    prog_restart || exit_val=${?}
-                else
-                    echo -n $"Stopping ${PROG}: "
-                    if function_defined prog_stop ; then
-                        prog_stop || exit_val=${?}
-                    else
-                        log_failure_msg "unimplemented function 'prog_stop'"
-                        exit_val=3
-                    fi
-                    if [ ${exit_val} -eq 0 ] ; then
-                        echo -n $"Starting ${PROG}: "
-                        if function_defined prog_start ; then
-                            prog_start || exit_val=${?}
-                        else
-                            log_failure_msg "unimplemented function 'prog_start'"
-                            exit_val=3
-                        fi
-                    fi
-                fi
-            else
-                log_success_msg "${PROG} not not running"
-            fi
-        else
-           log_failure_msg "unimplemented function 'prog_status'"
-        fi
-    ;;
-    reload|force-reload)
-        # Nodejs pm2 actually implements a reloca.
-        echo -n $"Reloading ${PROG}"
-        if function_defined prog_reload ; then
-            prog_reload || exit_val=${?}
-        else
-            log_failure_msg "unimplemented function 'prog_reload'"
-            exit_val=3
-        fi
-        ;;
-    *)
-        # ???
+    usage|'')
         prog_usage
-        #echo $"$( usage )"
-        exit_val=2
-        ;;
+    ;;
+    *)
+        if [ ${1} == condrestart ] ; then
+            # This is the old name for try-restart.
+            action=try-restart
+        else
+            action=${1}
+        fi
+        if assert_prog "${action}" ; then
+            printf '%s %s: ' \
+                $( echo "${action}" | sed -e 's/.*/\u&/' ) \
+                ${PROG_NAME}
+            prog_${action} || exit_val=${?}
+        else
+            log_failure_msg "unimplemented action '${action}'"
+            prog_usage
+            exit_val=3
+        fi
+    ;;
 esac
 
 exit ${exit_val}
