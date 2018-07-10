@@ -1,0 +1,249 @@
+# This default implementation for a pm2 managed application.
+
+# PM2_HOME is actually used by pm2.  This is the controllwing daemon
+# "home", not the application "home".
+: ${PM2_HOME:=/var/run/${PROG_NAME}/.pm2}
+: ${PM2_CMD:="$( which --skip-alias pm2 )"}
+: ${PM2_PID_FILE:=${PM2_HOME}/pm2.pid}
+
+# These are passed to pm2, but they are for managing a specific app.
+: ${APPLICATION_DIRECTORY:=${PROG_HOME}}
+: ${APPLICATION_START:=index.js}
+
+# This is kind of stupid: if the name is not set in the startup, the
+# application name will be set to the name of the file (without the ".js"
+# extention.  There is a real need for two different "PROG_NAME" settings,
+# due to this.  The way this is currently implemented is not ideal but
+# will need to be back-supported in this way so long as it exists.
+: ${PM2_PROG_NAME:=${APPLICATION_START%*.js}}
+
+# General functions for working withh the Node.js pm2 daemon.
+# ===
+
+pm2() {
+    runuser \
+        -s /bin/bash ${PROG_USER} \
+        -c "cd ${PM2_HOME} ; PM2_HOME=${PM2_HOME} ${PM2_CMD} ${*}"
+}
+
+pm2_status() {
+    process_status ${@} -p ${PM2_PID_FILE} pm2
+}
+
+pm2_nuke() {
+    # Doing a stop may not be enough to handle known corner cases.
+
+    # The following is *extremely* brute-force.
+
+    local socks=( $( find ${PM2_HOME} -name '*.sock' ) )
+
+    # This really shouldn't need to be done more than once.
+    if [ ${#socks[@]} -gt 0 ] ; then
+        fuser -k ${socks[@]} || true
+        rm -f ${socks[@]}
+    fi
+
+    # Assume we are no in a PM2-free world.  Make sure anything which
+    # may have been chowned in PM2_HOME is owned by the process user.
+    find ${PM2_HOME} \
+        ! \( -user ${PROG_USER} -group ${PROG_GROUP} \) \
+        -exec chown ${PROG_USER}:${PROG_GROUP} {} \;
+}
+
+pm2_stop() {
+    local retries=0 pm2_state=0
+
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
+        return 4
+    fi
+
+    pm2_status -q -i || pm2_state=${?}
+
+    for ((retries=0;retries<=${STOP_RETRY_MAX-${retries}};retries++)) ; do
+
+        pm2 kill || true
+        sleep ${STOP_RETRY_WAIT}
+
+        if pm2_status -q -i ; then
+            pm2_state=0
+            break
+        else
+             pm2_state=${?}
+        fi
+
+        ((retries++))
+    done
+
+    if [ ${pm2_state} -gt 2 ] ; then
+        # One last try using a generic process stop.
+        process_stop -p ${PM2_PID_FILE} pm2 || true
+        sleep ${STOP_RETRY_WAIT}
+        pm2_status -q -i && pm2_state=0 || pm2_state=${?}
+    fi
+
+    if [ ${pm2_state} -lt 3 ] ; then
+        # Make sure the pid file is removed.
+        rm -f ${PM2_PID_FILE}
+        pm2_state=0
+    fi
+
+    if [ ${pm2_state} -eq 0 ] ; then
+        log_success_msg
+    fi
+
+    # This is a noop if everything is in the correct state.
+    pm2_nuke || true
+
+    return ${pm2_state}
+}
+
+# Generic Node.js functions for apps managed by the pm2 daemon.
+# ===
+
+app_status() {
+    process_status ${@} -p ${PID_FILE} -l ${LOCK_FILE} ${PROG_NAME}
+}
+
+app_status_code() {
+    app_status -q ${@} && echo 0 || echo ${?}
+}
+
+app_list() {
+    local ret_val=0
+
+    # Do not do anything if pm2 is not actually running, since
+    # this will cause pm2 to silently start a daemon.
+    if pm2_status -q -i ; then
+        return 1
+    fi
+
+    if ! assert_privileges ; then
+        # Do not perform any pm2 commands without a wrapper --
+        # which will require root access to use runuser.  Just
+        # about any pm2 command run when the daemon is not
+        # actually running will cause pm2 to silently start
+        # one using the current effective user.
+
+        return 4
+    fi
+
+    pm2 list
+}
+
+app_stop() {
+
+    local app_state=0 retries=0
+    app_state=$( app_status_code -i )
+
+    for ((retries=0;retries<=${STOP_RETRY_WAIT-${retries}};retries++)) ; do
+        # If this is not explicitly named in the startup, this will be
+        # the name of js file used to start the daemon.  Problematic.
+        pm2 stop ${PM2_PROG_NAME} || true
+        pm2 delete ${PM2_PROG_NAME} || true
+
+        sleep ${STOP_RETRY_WAIT}
+
+        if app_status -q -i ; then
+            app_state=0
+            break
+        else
+            app_state=${?}
+        fi
+        ((retries++))
+    done
+
+    if [ ${app_state} -lt 3 ] ; then
+        # Make sure pid and lock files are removed.
+        rm -f ${PID_FILE} /var/lock/subsys/${LOCK_FILE}
+        app_state=0
+    fi
+
+    if [ ${app_state} -ne 0 ] ; then
+        # One last try using the generic process stop.
+        process_stop -p ${PID_FILE} -l ${LOCK_FILE} || true
+        app_state=$( app_status_code -i )
+    fi
+
+    if [ ${app_state} -eq 0 ] ; then
+        log_success_msg
+    else
+        log_failure_msg unable to stop application normally
+    fi
+
+    return ${app_state}
+}
+
+prog_stop() {
+    # Redefine the default prog_stop, since there are two daemons to stop.
+
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
+        return 4
+    fi
+    app_stop || true
+    pm2_stop
+}
+
+prog_reload() {
+    # There is a pm2 reload documented, so add this as an initscript action.
+
+    if ! assert_privileges ; then
+        log_failure_msg insufficient privileges
+        return 4
+    fi
+
+    local ret_val=0
+    local msg="$( pm2 reload ${PM2_PROG_NAME} 2>&1 )" \
+        || ret_val=${?}
+
+    if [ ${ret_val} -eq 0 ] ; then
+        log_success_msg
+    else
+        log_failure_msg failed to reload
+        echo "${msg}"
+        ret_val=1
+    fi
+
+    return ${ret_val}
+}
+
+prog_status() {
+    # Extend the prog_status with the app_list when the script is
+    # run with superuser privileges.
+
+    local ret_val=0
+    app_status "${@}" || ret_val=${?}
+
+    [[ "${*}" =~ -q ]] || app_list "${@}" || true
+
+    return ${ret_val}
+}
+
+PID_FILE_NAME=${PROG_NAME}
+PID_FILE_PATH=${PM2_HOME}/pids
+PID_FILE=${PID_FILE_PATH}/${PID_FILE_NAME}
+
+: ${LOG_FILE_PATH:=/var/log/${PROG_NAME}}
+: ${LOG_FILE_NAME:=${PROG_NAME}}
+LOG_FILE=${LOG_FILE_PATH}/${LOG_FILE_NAME}
+
+if [ -z "${PROG_START_COMMAND}" ] ; then
+    # The --name parameter is not currently used, so pm2 ends up using
+    # the name of file as the application name.  Leaving the PM2_PROG_NAME
+    # as default replicates the current behavior.
+
+    PROG_START_COMMAND="
+        cd ${APPLICATION_DIRECTORY} ;
+        PM2_HOME=${PM2_HOME} ${PM2_CMD}
+        start ${APPLICATION_DIRECTORY}/${APPLICATION_START}
+        --name ${PM2_PROG_NAME}
+        --output ${LOG_FILE}
+        --error ${LOG_FILE}
+        --pid ${PID_FILE}
+        --interpreter=${APPLICATION_DIRECTORY}/node/bin/node
+    "
+
+    PROG_START_COMMAND=$( printf '{ %s ; } &>/dev/null' "${PROG_START_COMMAND}" | tr -s [:space:] ' ' )
+
+fi

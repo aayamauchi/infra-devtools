@@ -1,0 +1,192 @@
+#!/bin/bash
+#
+# <daemonname> <summary>
+#
+# chkconfig:   - 81 16
+# description: <description, split multiple lines with \
+#              a backslash>
+
+### BEGIN INIT INFO
+# Provides:
+# Required-Start: $local_fs $network
+# Required-Stop: $local_fs $network
+# Should-Start:
+# Should-Stop:
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description:
+# Description:
+### END INIT INFO
+
+source /etc/init.d/functions
+source /lib/lsb/init-functions
+
+: ${PROG:=${0##*/}}
+
+if [ -r /etc/sysconfig/${PROG} ] ; then
+    source /etc/sysconfig/${PROG}
+fi
+
+: ${PROG_USER:=${PROG}}
+: ${PROG_GROUP:=${PROG_USER}}
+: ${PROG_HOME:=$( getent passwd ${PROG_USER} | cut -d: -f6 )}
+
+: ${PID_FILE_PATH:=/var/run/${PROG}}
+: ${PID_FILE_NAME:=${PROG}.pid}
+: ${PID_FILE:=${PID_FILE_PATH}/${PID_FILE_NAME}}
+: ${LOCK_FILE:=/var/lock/subsys/${PROG}}
+: ${LOG_PATH:=/var/log/${PROG}}
+
+
+: ${STOP_RETRY_INTERVAL:=3}
+# By default, the max number of stop retry attempts is unlimited.
+[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+
+START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE}"
+
+: ${ULIMIT_OPTS:='-n 65536'}
+
+rh_status() {
+    if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG} &>/dev/null
+    else
+        status -p ${PID_FILE} -l ${LOCK_FILE} ${PROG}
+    fi
+}
+
+start() {
+
+    if [ ${UID} -ne 0 ] ; then
+        log_failure_msg superuser privileges are required
+        return 4
+    fi
+
+    local current_state=0
+    rh_status -q || current_state=${?}
+    case "${current_state}" in
+        0)
+            log_success_msg "${PROG} is already running"
+            return 0
+        ;;
+        [12])
+            # Try clearing pid and lock files and hope for the best.
+            rm -f ${PID_FILE} ${LOCK_FILE}
+        ;;
+    esac
+
+    ulimit ${ULIMIT_OPTS} &>/dev/null || true
+
+    # Form the command used to start the daemon.
+    local cmd=
+
+    cd ${PROG_HOME}
+
+    daemon ${START_STOP_DAEMON_ARGS} "${cmd} 1>>${LOG_PATH}/daemon.out 2>>${LOG_PATH}/daemon.err &"
+
+    sleep ${STOP_RETRY_INTERVAL}
+
+    if rh_status -q ; then
+        touch ${LOCK_FILE}
+        log_success_msg
+        return 0
+    else
+        rm -f ${PID_FILE}
+        log_failure_msg unable to start ${PROG}
+        return 1
+    fi
+}
+
+stop() {
+
+    local process_state=0
+
+    if [ ${UID} -ne 0 ] ; then
+        if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+            log_failure_msg superuser privileges are required
+        fi
+        return 4
+    fi
+
+    rh_status -q || process_state=${?}
+
+    if [ ${process_state} -gt 0 ] ; then
+        if [ ${process_state} -lt 4 ] ; then
+            rm -f ${PID_FILE} ${LOCK_FILE}
+            #log_success_msg
+            return 0
+        else
+            if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+                log_failure_msg process ${PROG} in unknown state
+            fi
+            return 1
+        fi
+    fi
+
+    killproc -p ${PID_FILE} || true
+    sleep ${STOP_RETRY_INTERVAL}
+
+    # make this a forcible stop, by default.
+    local retries=0
+    while rh_status -q && [ ${retries} -lt ${STOP_RETRY_MAX-1} ] ; do
+        kill -9 $(< ${PID_FILE} )
+        [ -z "${STOP_RETRY_MAX}" ] || ((retries+=1))
+        sleep ${STOP_RETRY_INTERVAL}
+    done
+
+    rh_status -q || process_state=${?}
+    if [ ${process_state} -lt 4 ] ; then
+        rm -f ${LOCK_FILE} ${PID_FILE}
+        #log_success_msg
+        return 0
+    else
+        if [[ ${1} =~ ^(-q|--quiet)$ ]] ; then
+            log_failure_msg ${STOP_RETRY_MAX} stop attempts failed
+        fi
+        return 1
+    fi
+}
+
+exit_val=0
+case "${1}" in
+    start)
+        echo -n $"Starting ${PROG}: "
+        start || exit_val=${?}
+        ;;
+    stop)
+        echo -n $"Stopping ${PROG}: "
+        stop || exit_val=${?}
+        ;;
+    restart|reload|force-reload)
+        echo -n $"Stopping ${PROG}: "
+        if [ "$( type -t ${1/-/_} )" == function ] ; then
+            ${1/-/_} || exit_val=${?}
+        else
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+            fi
+        fi
+        ;;
+    status)
+        rh_status || exit_val=${?}
+        ;;
+    try-restart|condrestart)
+        if rh_status -q ; then
+            echo -n $"Stopping ${PROG}: "
+            stop || exit_val=${?}
+            if [ ${exit_val} -eq 0 ] ; then
+                echo -n $"Starting ${PROG}: "
+                start || exit_val=${?}
+            fi
+        else
+            log_success_msg process ${PROG} is not running
+        fi
+        ;;
+    *)
+        echo $"Usage: ${0} {start|stop|status|restart|try-restart|condrestart|reload|force-reload}"
+        exit_val=2
+        ;;
+esac
+
+exit ${exit_val}
