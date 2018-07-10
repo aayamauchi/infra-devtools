@@ -59,7 +59,7 @@ process_status() {
     return ${ret_val}
 }
 
-process_state_code() {
+process_status_code() {
     # It is so annoying when checking for status codes and having to
     # worry about bullet-proofing everything in case of ERR traps.
 
@@ -84,26 +84,32 @@ process_stop() {
             shift 2
         ;;
         -l)
-            lock_file=${2}
+            lock_file_name=${2}
             shift 2
         ;;
         esac
     done
+
+    if [ -n "${lock_file_name}" ] ; then
+        lock_file=/var/lock/subsys/${lock_file_name}
+    else
+        unset lock_file
+    fi
     process_name=${1}
-   
-    process_state=$( process_state_code -i ${args[@]} )
+
+    process_state=$( process_status_code -i ${args[@]} )
 
     for ((retries=0;retries<=${STOP_RETRY_MAX-${retries}};retries++)) ; do
 
         # Remove stale pid or lock files.
         if [ ${process_state} -gt 0 ] ; then
             if [ ${process_state} -le 2 ] ; then
-                rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
+                rm -f ${pid_file} ${lock_file}
             else
                 stop ${@}
                 sleep ${STOP_RETRY_WAIT}
             fi
-            process_state=$( process_state_code -i ${@} )
+            process_state=$( process_status_code -i ${@} )
         fi
 
         if [ ${process_state} -eq 4 ] ; then
@@ -126,11 +132,11 @@ process_stop() {
             killall -u ${PROG_USER}
         fi
 
-        process_state=$( process_state_code -i ${@} )
+        process_state=$( process_status_code -i ${@} )
 
         if [[ ${process_state} =~ ^[12]$ ]] ; then
-            rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
-            process_state=$( process_state_code -i ${@} )
+            rm -f ${pid_file} ${lock_file}
+            process_state=$( process_status_code -i ${@} )
         fi
 
         if [ ${process_state} -eq 0 ] ; then
@@ -149,7 +155,7 @@ process_start() {
     # any specified ulimit settings.
 
     local args=("${@}")
-    local process_name= pid_file= lock_file=
+    local process_name= pid_file= lock_file_name= lock_file=
 
     while [ ${#} -gt 1 ] ; do
         case "${1}" in
@@ -158,21 +164,26 @@ process_start() {
             shift 2
         ;;
         -l)
-            lock_file=${2}
+            lock_file_name=${2}
             shift 2
         ;;
         esac
     done
     process_name=${1}
-   
+    if [ -n "${lock_file_name}" ] ; then
+        lock_file=/var/lock/subsys/${lock_file_name}
+    else
+        unset lock_file
+    fi
+
     if ! assert_privileges ; then
         log_failure_msg insufficient privileges
         return 4
     fi
 
     local current_state=0
-    
-    process_state=$( process_state_code ${args[@]} )
+
+    process_state=$( process_status_code ${args[@]} )
 
     case "${process_state}" in
         0)
@@ -181,7 +192,7 @@ process_start() {
         ;;
         [12])
             # Try clearing pid or lock files and hope for the best.
-            rm -f ${pid_file}${lock_file+ /var/lock/subsys/${lock_file}}
+            rm -f ${pid_file} ${lock_file}
         ;;
     esac
 
@@ -191,15 +202,16 @@ process_start() {
 
     for ((retries=0;retries<=${START_RETRY_MAX-${retries}};retries++)) ; do
         daemon ${START_STOP_DAEMON_ARGS} "${PROG_START_COMMAND}"
+        # The status checks do not work correctly unless the lock file exists.
+        [ -z "${lock_file}" ] || touch ${lock_file}
 
         sleep ${START_RETRY_WAIT}
 
         if process_status -q ${args[@]} ; then
-            [ -z "${lock_file}" ] || touch /var/lock/subsys/${lock_file}
             log_success_msg
             return 0
         else
-            rm -f ${pid_file}
+            rm -f ${pid_file} ${lock_file}
         fi
     done
 
@@ -311,7 +323,7 @@ prog_force-reload() {
     if prog_status -q "${@}" ; then
         if assert_prog reload ; then
             prog_reload "${@}"
-        else 
+        else
             prog_restart "${@}"
         fi
     else
