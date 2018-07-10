@@ -376,7 +376,10 @@ fi
 [[ ${START_RETRY_MAX} =~ ^[[:digit:]] ]] || unset START_RETRY_MAX
 
 : ${STOP_RETRY_WAIT:=3}
-[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+# This will actually trap a process stop in a perpetual loop and
+# not allow the sigkill actions to happen if it is unset.
+#[[ ${STOP_RETRY_MAX} =~ ^[[:digit:]] ]] || unset STOP_RETRY_MAX
+: ${STOP_RETRY_MAX:=3}
 
 START_STOP_DAEMON_ARGS+="${START_STOP_DAEMON_ARGS+ }--user ${PROG_USER} --pidfile ${PID_FILE} --check ${PROG_NAME}"
 
