@@ -15,9 +15,10 @@ installations which are not set at the system default by alternatives (ie.
 due to the need to set Ruby 1.8 to the system default in order to support the
 Puppet agent, since Rubygems 1.8 is not installed).
 
-The rubygems23 installation is strongly preferred if it needs to be installed.
-The cobravsmongoose gem also needs to be installed. This is available in the
-local yum repository as rubygems23-cobravsmongoose.
+The rubygems23 (or newer) installation is strongly preferred if it needs
+to be installed.  The cobravsmongoose gem also needs to be installed.
+This is available in the local yum repository as rubygems23-cobravsmongoose on any AWX instance.   For workstations/laptops, use the standard gem
+installation: 'gem install cobravsmongoose'.
 
 This script takes no arguments except '-h' or '--help': it expects YAML
 (Badgerfish convention) input on STDIN and outputs XML to STDOUT.
