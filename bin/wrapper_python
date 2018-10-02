@@ -6,6 +6,13 @@
 # this, along with some other shell utility content, at some point -- under
 # and unopensource license and reserve all rights to do so.
 
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+if [[ "${0}" =~ \/ ]] ; then
+    source $( cd ${0%/*}/../lib ; echo ${PWD} )/utils.bash
+else
+    source $( cd $( dirname $( which ${0} | head -n1 ) )/../lib ; echo ${PWD} )/utils.bash
+fi
+
 # Symlink python scripts (without extension) to get paths set correctly.
 
 if [[ "${0}" =~ \/ ]] ; then

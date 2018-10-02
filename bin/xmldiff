@@ -13,4 +13,11 @@
 #
 # - https://github.com/joh/xmldiffs
 
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+if [[ "${0}" =~ \/ ]] ; then
+    source $( cd ${0%/*}/../lib ; echo ${PWD} )/utils.bash
+else
+    source $( cd $( dirname $( which ${0} | head -n1 ) )/../lib ; echo ${PWD} )/utils.bash
+fi
+
 exec ${0}s.py "${@}"
