@@ -11,7 +11,7 @@ import os
 
 from utils import data_diff
 from yaml import load,dump
-import simplejson as json
+import json
 
 obj = []
 for fh in [ open(x,'r') for x in sys.argv[1:] ]:
