@@ -93,7 +93,7 @@ fi
 if [ -n "${BSD_stat}" ] ; then
     # Every. Single. Command.
 
-    local ret_val=0 cmd_out=
+    ret_val=0 cmd_out=
 
     stat() {
         local fix_mode=$( echo "${*}" | grep -e '%a' )
