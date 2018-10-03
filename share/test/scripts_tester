@@ -4,9 +4,6 @@ if ! which yaml2xml &>/dev/null ; then
     echo 'Please set the infra-devtools:bin path in your PATH.' 1>&2
 fi
 
-# The following syntax should be compatible with both GNU and BSD versions
-# of the sed command.
-
 if [[ "${0}" =~ \/ ]] ; then
     TEST_SCRIPT_BASE_PATH=$( cd ${0%/*} ; echo ${PWD} )
 else
