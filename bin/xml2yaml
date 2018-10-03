@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+if [[ "${0}" =~ \/ ]] ; then
+    source $( cd ${0%/*}/../lib ; echo ${PWD} )/utils.bash
+else
+    source $( cd $( dirname $( which ${0} | head -n1 ) )/../lib ; echo ${PWD} )/utils.bash
+fi
+
+USAGE="
+${0##*/} [-h|--help]
+
+This script requires a rubygems installation.  It will be able to find gem
+installations which are not set at the system default by alternatives (ie.
+due to the need to set Ruby 1.8 to the system default in order to support the
+Puppet agent, since Rubygems 1.8 is not installed).
+
+The rubygems23 (or newer) installation is strongly preferred if it needs
+to be installed.  The cobravsmongoose gem also needs to be installed.
+This is available in the local yum repository as rubygems23-cobravsmongoose on any AWX instance.   For workstations/laptops, use the standard gem
+installation: 'gem install cobravsmongoose'.
+
+This script takes no arguments except '-h' or '--help': it expects XML input
+on STDIN and outputs YAML (Badgerfish convention) to STDOUT.
+"
+
+die() {
+    local exit_val=${1-0}
+    shift
+    if [ ${exit_val} -eq 0 ] ; then
+        echo "${*}"
+    else
+        echo "${*}" 1>&2
+    fi
+
+    exit ${exit_val}
+}
+
+die_with_usage() {
+    local message="${USAGE}"
+    local exit_val=${1-0}
+    shift
+    if [ ${#} -gt 0 ] ; then
+        message=$( printf '%s\n\n%s' "${*}" "${message}" )
+    fi
+    die ${exit_val} "${message}"
+}
+
+if [ ${#} -gt 0 ] ; then
+    [[ "${1}" =~ ^(-h|--help)$ ]] \
+        && die_with_usage \
+        || die_with_usage 1 "Unrecognized argument '${1}'"
+fi
+
+# This is dumb.  The ruby alternatives needs to be set to Ruby 1.8 to suppet
+# Puppet, but rubygems18 is not generally installed.
+gem=$( which gem 2>/dev/null )
+if [ ${?} -eq 0 ] ; then
+    ruby=$( which ruby )
+else
+    gem=$( find /usr/bin -maxdepth 1 -type f -name 'gem?.?' | sort -r | head -n1 )
+    if [ "${gem:0:1}" == '/' ] ; then
+        ruby=${gem/gem/ruby} 
+    else
+        die_with_usage 10 This script requires a rubygems installation.
+        fi
+fi
+
+# Stupid -- don't get a failure code if this is not found.
+[ -n "$( ${gem} list --quiet -l cobravsmongoose )" ] \
+    || die_with_usage 11 This script requires the cobravsmongoose library.
+
+# The rubygems seems to be required for version 1.8.
+
+ruby_script="
+    require 'rubygems'
+    require 'cobravsmongoose'
+    require 'yaml'
+
+    CobraVsMongoose.sort_keys = true
+
+    STDOUT.write(YAML.dump(CobraVsMongoose.xml_to_hash(STDIN.read())))
+"
+
+# Stupid library is setting NULL keys on headers and comments.
+sed -e '
+    /^<?/ d
+    /<\!--.*-->/ d
+    /<\!--/,/-->/ d
+' | ${ruby} -e "${ruby_script}"

@@ -1,0 +1,25 @@
+#!/bin/bash
+
+if ! [ -x /usr/local/bin/yamllint ] ; then
+	cat<<-END_OF_MESSAGE 1>&2
+		Python yamllint is required.  Use 'pip install yamllint'.
+		Not that this bin path must appear before '/usr/local/bin'
+		in the PATH in order for this script to work correctly.
+	END_OF_MESSAGE
+
+    exit 1
+fi
+
+if [[ "${0}" =~ \/ ]] ; then
+    DEVTOOLS_CHECKOUT_PATH=$( cd ${0%/*}/.. ; echo ${PWD} )
+else
+    DEVTOOLS_CHECKOUT_PATH=$( cd $( dirname $( which ${0} | head -n1 ) )/.. ; echo ${PWD} )
+fi
+
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+source ${DEVTOOLS_CHECKOUT_PATH}/lib/utils.bash
+
+: ${YAMLLINT_CONFIG:=${DEVTOOLS_CHECKOUT_PATH}/share/conf/yamllint}
+[ -n "${YAMLLINT_OPTS+set}" ] || YAMLLINT_OPTS='-f parsable'
+/usr/local/bin/yamllint -c ${YAMLLINT_CONFIG} ${YAMLLINT_OPTS} "${@}"
+

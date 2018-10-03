@@ -1,0 +1,65 @@
+#!/bin/bash
+
+if ! which yaml2xml &>/dev/null ; then
+    echo 'Please set the infra-devtools:bin path in your PATH.' 1>&2
+fi
+
+# The following syntax should be compatible with both GNU and BSD versions
+# of the sed command.
+
+if [[ "${0}" =~ \/ ]] ; then
+    TEST_SCRIPT_BASE_PATH=$( cd ${0%/*} ; echo ${PWD} )
+else
+    TEST_SCRIPT_BASE_PATH=$( cd $( dirname $( which ${0} | head -n1 ) ) )
+fi
+
+cd ${TEST_SCRIPT_BASE_PATH}/workspace
+
+printf '===\nStarting with a straight copy of logback.xml from an api server\n===\n'
+cp ${TEST_SCRIPT_BASE_PATH}/logback.xml ./logback-0.xml
+
+printf '===\nCreating a YAML (badgerfish) version of the logback.xml\n===\n'
+xml2yaml < logback-0.xml > logback-0.yaml
+
+printf '===\nLinting the YAML version to verify the format\n===\n'
+yamllint logback-0.yaml
+
+printf '===\nCreating a XML version from the YAML\n===\n'
+yaml2xml < logback-0.yaml > logback-1.xml
+
+printf '===\nDifferencing the XML versions to verify nothing has changed\n===\n'
+xmldiff logback-{0,1}.xml
+
+printf '===\nCreating a YAML version from the generated XML version\n===\n'
+xml2yaml < logback-0.xml > logback-1.yaml
+
+printf '===\nDifferencing the YAML versions to verify nothing has changed\n===\n'
+yamldiff logback-{0,1}.yaml
+
+printf '===\nCreating a modified the XML version with <maxHistory> removed\n===\n'
+grep -v '<maxHistory>' logback-0.xml > logback-2.xml
+
+printf '===\nDifferencing the original and modified XML versions to verify that it finds the change\n===\n'
+xmldiff logback-{0,2}.xml
+
+printf '===\nCreating a modified the YAML version with maxHistory key/value removed\n===\n'
+# ... and grep doesn't work as expected, either.  Joy.
+#grep -A1 -v 'maxHistory:' logback-0.yaml > logback-2.yaml
+# Why are the BSD versions of everything so useless?
+#sed -e '/maxHistory:/,+ d;' logback-0.yaml > logback-2.yaml
+sed -e '21,22 d;' logback-0.yaml > logback-2.yaml
+
+printf '===\nDifferencing the original and modified YAML versions to verify that it finds the change\n===\n'
+yamldiff logback-{0,2}.yaml
+
+printf '===\nCreating YAML version from the modified XML version\n===\n'
+xml2yaml < logback-2.xml > logback-3.yaml
+
+printf '===\nDifferencing the modified YAML with the YAML created from the modified XML to verify they are equivalent\n===\n'
+yamldiff logback-{2,3}.yaml
+
+printf '===\nCreating XML version from the modified YAML version\n===\n'
+yaml2xml < logback-2.yaml > logback-3.xml
+
+printf '===\nDifferencing the modified XML with the XML created from the modified YAML to verify they are equivalent\n===\n'
+xmldiff logback-{2,3}.xml

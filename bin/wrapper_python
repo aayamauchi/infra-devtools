@@ -1,0 +1,74 @@
+#!/bin/bash
+
+# This is a personally developed stuff that I (Alex Yamauchi) created, circa
+# 2014, prior to my employment at Hotschedules.  I am adding it here since I
+# use it constantly and think others may find it useful.  I plan to publish
+# this, along with some other shell utility content, at some point -- under
+# and unopensource license and reserve all rights to do so.
+
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+if [[ "${0}" =~ \/ ]] ; then
+    source $( cd ${0%/*}/../lib ; echo ${PWD} )/utils.bash
+else
+    source $( cd $( dirname $( which ${0} | head -n1 ) )/../lib ; echo ${PWD} )/utils.bash
+fi
+
+# Symlink python scripts (without extension) to get paths set correctly.
+
+if [[ "${0}" =~ \/ ]] ; then
+	SCRIPT_PATH="$( cd ${0%/*} ; pwd )"
+else
+	SCRIPT_PATH="$( which --skip-alias ${0##*/} | sed -e 's@/[^/]*$@@' )"
+fi
+
+SCRIPT="${0##*/}"
+
+: ${PYTHON_SCRIPT:=${SCRIPT}.py}
+
+if [ -z "${PYTHON_SCRIPT_PATH}" ] ; then
+	if [ -x ${SCRIPT_PATH}/${PYTHON_SCRIPT} ] ; then
+		# SCRIPT_PATH is relative to the symlink.
+		PYTHON_SCRIPT_PATH=${SCRIPT_PATH}
+	elif [ -L ${SCRIPT} ] ; then
+		# This is a mess -- stat seems to have recently changed it's output format.
+		link_target="$( stat --printf=%N ${SCRIPT} | sed -e 's@[^/[:alnum:]]*@@;s@^.*[[:space:]][^/[:alnum:]]@@' )"
+
+		if [[ "${link_target}" =~ \/ ]] ; then
+			# Link target is in a different path.  We'll trust the user and let
+			# the exception be thrown later if they've done something stupid.
+			SCRIPT_PATH="$( cd ${link_target%/*} ; pwd )"
+		else
+			# Either in the current directory or in the PATH.
+			if which --skip-alias "${PYTHON_SCRIPT}" &>/dev/null ; then
+				# Extremely doubtful.
+				unset PYTHON_SCRIPT_PATH
+			else
+				PYTHON_SCRIPT_PATH="$(pwd)"
+			fi
+		fi
+	fi
+fi
+
+[ -z "${PYTHON_SCRIPT_PATH}" ] || \
+	export PATH="${PATH}${PATH+:}${PYTHON_SCRIPT_PATH}"
+
+# For now, go with the usual convention with setting defaults.  Make sure
+# we do not end up conflicting with an existing path.
+: ${PYTHONPATH:=${PYTHON_SCRIPT_PATH%/*}/lib}
+
+# This is bad.  Cannot depend on the shebangs in Python scripts, especially
+# since the Python 2.6 specification for RHEL 5 is not compatible with RHEL 6.
+# Standardize everything wrapped by this script on version 2.6+ and ignore
+# and bypass the shebang issue.
+PYTHON=$( which python )
+if ${PYTHON} -V 2>/dev/null | grep -q ' 2.4' ; then
+    if which python26 1>/dev/null ; then
+        PYTHON=$( which python26 )
+        # Go ahead and alias this, too.
+        alias python="${PYTHON}"
+    fi
+fi
+
+export PYTHON PYTHONPATH
+
+exec ${PYTHON} ${PYTHON_SCRIPT_PATH}/${PYTHON_SCRIPT} "${@}"

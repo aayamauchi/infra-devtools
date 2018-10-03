@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Wrapping this to keep the actually script/lib file unaltered and provide
+# information as to it's source.  Also, since this is not getting installed
+# into a standard system execution path, there is no need to retain the
+# original name "xmldiffs".
+
+# There are so many "XML diff" implementations, and yet this is the *only*
+# one I could find which did not flag differences in hash key ordering
+# (which is *not* part of the XML standard, anyway) and did not choke
+# on comments.  The original script is available at the following URL
+# and is distributed under the BDS license:
+#
+# - https://github.com/joh/xmldiffs
+
+# Insert converters so this might work on Mac OSuX with no further rewrites;
+if [[ "${0}" =~ \/ ]] ; then
+    source $( cd ${0%/*}/../lib ; echo ${PWD} )/utils.bash
+else
+    source $( cd $( dirname $( which ${0} | head -n1 ) )/../lib ; echo ${PWD} )/utils.bash
+fi
+
+exec ${0}s.py "${@}"

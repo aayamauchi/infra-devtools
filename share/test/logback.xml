@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Set debug to true to get logback config conflicts with multiple logback.xml -->
+<configuration scan="true" scanPeriod="90 seconds" debug="false">
+ <!-- Silences the console debug output of logback when multiple logback.xml files are found -->
+ <statusListener class="ch.qos.logback.core.status.NopStatusListener" />
+
+ <appender name="FILE_ROLLING" class="ch.qos.logback.core.rolling.RollingFileAppender">
+  <file>/var/log/rbcserver/application.log</file>
+  <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+   <!-- rollover daily and gzip the archive. The file pattern for %i is the number of segments when size is exceeded starting 
+    at 0 -->
+   <fileNamePattern>/var/log/rbcserver/application.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+   <timeBasedFileNamingAndTriggeringPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedFNATP">
+    <!-- or whenever the file size reaches 100MB -->
+    <maxFileSize>100MB</maxFileSize>
+   </timeBasedFileNamingAndTriggeringPolicy>
+   <!-- keep 10 days' worth of history -->
+   <maxHistory>10</maxHistory>
+  </rollingPolicy>
+  <!-- JSON Encoder -->
+  <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+   <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %5p [%thread] %c: %.-500000msg%n</pattern>
+   <!-- this quadruples logging throughput -->
+    <immediateFlush>true</immediateFlush>
+  </encoder>
+ </appender>
+
+ <appender name="ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+  <appender-ref ref="FILE_ROLLING" />
+ </appender>
+
+<!-- RBC Classes -->
+<!--  <logger name="AccessLog" level="INFO" additivity="false"> -->
+<!--   <appender-ref ref="ASYNC" /> -->
+<!--  </logger> -->
+ <logger name="application" level="INFO" additivity="false">
+  <appender-ref ref="ASYNC" />
+ </logger>
+ <logger name="com.rbcplatform" level="INFO" additivity="false">
+  <appender-ref ref="ASYNC" />
+ </logger>
+ <root level="WARN" additivity="false">
+  <appender-ref ref="ASYNC" />
+ </root>
+
+</configuration>
