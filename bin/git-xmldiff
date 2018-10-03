@@ -1,0 +1,55 @@
+#!/bin/bash
+
+# To use this directly from git -- ie. 'git xmldiff ref1 ref2', add the
+# following to your gitconfig [alias] section:
+#
+#     xmldiff = !sh \"git-xmldiff ${@}\"
+#
+# Note that if the clone directory bin path is not in your PATH, then the
+# full path will need to be specified in the git-xmldiff invocation.
+
+trap 'rm -rf ${TMP_DIR}' EXIT
+TMP_DIR=$( mktemp -d )
+
+if [ ${#} -gt 0 ] ; then
+    if [[ ${@: -1:1} =~ \.\. ]] ; then
+        refs=( $( echo ${@: -1:1} | sed -e 's/\.\./ /;' ) )
+    else
+        refs=( ${@: -2:2} )
+    fi
+else
+    # When there are no args, this has to be a diff of the branch
+    # head to the current workspace content.
+    refs=( HEAD )
+fi
+
+base_paths=( a b )
+    
+while read line ; do
+    filename="${line##*/}"
+    filepath="${line%/*}"
+
+    for i in 0 1 ; do
+        [ -d "${TMP_DIR}/${base_paths[${i}]}/${filepath}" ] \
+            || mkdir -p "${TMP_DIR}/${base_paths[${i}]}/${filepath}"
+        if [ ${i} -eq 0 -o \( ${i} -eq 1 -a -n "${refs[${i}]}" \) ] ; then
+            git show "${refs[${i}]}:${filepath}/${filename}" \
+                > "${TMP_DIR}/${base_paths[${i}]}/${filepath}/${filename}"
+        else
+            # Must be uncommitted changes to this file in the workspace.
+            cp \
+                "${filepath}/${filename}" \
+                "${TMP_DIR}/${base_paths[${i}]}/${filepath}/${filename}"
+        fi
+    done
+    
+done < <( git diff --name-only "${@}" | grep -e '\.xml$' )
+
+# Of course Mac OSuX doesn't support this.
+#for f in $( find ${TMP_DIR}/${base_paths[0]} -type f -printf '%P\n' ) ; do
+for f in $( find ${TMP_DIR}/${base_paths[0]} -type f | sed -e "s@${TMP_DIR}/${base_paths[0]}/@@;" ) ; do
+    printf 'xmldiff "%s:%s" "%s:%s"\n' ${refs[0]} "${f}" ${refs[1]-UNCOMMITTED} "${f}"
+    xmldiff \
+        ${TMP_DIR}/${base_paths[0]}/"${f}" \
+        ${TMP_DIR}/${base_paths[1]}/"${f}"
+done
