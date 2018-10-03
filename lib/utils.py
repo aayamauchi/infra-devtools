@@ -11,7 +11,7 @@ import sys
 import os
 
 from copy import deepcopy
-import simplejson as json
+import json
 
 def debug(tag,message):
     if 'DEBUG' in os.environ:
