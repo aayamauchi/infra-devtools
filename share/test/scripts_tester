@@ -1,13 +1,13 @@
 #!/bin/bash
 
-if ! which yaml2xml &>/dev/null ; then
-    echo 'Please set the infra-devtools:bin path in your PATH.' 1>&2
-fi
-
 if [[ "${0}" =~ \/ ]] ; then
     TEST_SCRIPT_BASE_PATH=$( cd ${0%/*} ; echo ${PWD} )
 else
     TEST_SCRIPT_BASE_PATH=$( cd $( dirname $( which ${0} | head -n1 ) ) )
+fi
+
+if ! which yaml2xml &>/dev/null ; then
+    export PATH=${TEST_SCRIPT_BASE_PATH%share/test}/bin:${PATH}
 fi
 
 cd ${TEST_SCRIPT_BASE_PATH}/workspace
