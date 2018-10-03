@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# To use this directly from git -- ie. 'git yamldiff ref1 ref2', add the
+# To use this directly from git -- ie. 'git xmldiff ref1 ref2', add the
 # following to your gitconfig [alias] section:
 #
-#     yamldiff = !sh \"git-yamldiff ${@}\"
+#     xmldiff = !sh \"git-xmldiff ${@}\"
 #
 # Note that if the clone directory bin path is not in your PATH, then the
-# full path will need to be specified in the git-yamldiff invocation.
+# full path will need to be specified in the git-xmldiff invocation.
 
 trap 'rm -rf ${TMP_DIR}' EXIT
 TMP_DIR=$( mktemp -d )
@@ -43,13 +43,13 @@ while read line ; do
         fi
     done
     
-done < <( git diff --name-only "${@}" | grep -e '\.\(yaml\|yml\)$' )
+done < <( git diff --name-only "${@}" | grep -e '\.xml$' )
 
 # Of course Mac OSuX doesn't support this.
 #for f in $( find ${TMP_DIR}/${base_paths[0]} -type f -printf '%P\n' ) ; do
 for f in $( find ${TMP_DIR}/${base_paths[0]} -type f | sed -e "s@${TMP_DIR}/${base_paths[0]}/@@;" ) ; do
-    printf 'yamldiff "%s:%s" "%s:%s"\n' ${refs[0]} "${f}" ${refs[1]-UNCOMMITTED} "${f}"
-    yamldiff \
+    printf 'xmldiff "%s:%s" "%s:%s"\n' ${refs[0]} "${f}" ${refs[1]-UNCOMMITTED} "${f}"
+    xmldiff \
         ${TMP_DIR}/${base_paths[0]}/"${f}" \
         ${TMP_DIR}/${base_paths[1]}/"${f}"
 done
