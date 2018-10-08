@@ -37,6 +37,6 @@ unset IFS
 #exec yamllint -c "$DIR/../../../conf/yamllint" -f parsable $YAMLS
 
 # this version reports only actual yaml syntax problems
-command=(yamllint -d "{ rules: { key-duplicates: {} } }" ${YAMLS[@]})
+command=(/usr/local/bin/yamllint -d "{ rules: { key-duplicates: {} } }" ${YAMLS[@]})
 echo "Running: ${command[@]}"
 exec "${command[@]}"
