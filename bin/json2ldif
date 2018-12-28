@@ -1,0 +1,28 @@
+#!/usr/bin/env ruby1.8
+
+# The v0.8.0 version of net-ldap 2014 is the last version which will work
+# with Ruby 1.8.  Also, the Ruby 1.8 require rubygems in order to load
+# content installed by gems: newer versions no longer require this.
+require 'rubygems'
+require 'net/ldap'
+require 'json'
+
+datasets = JSON.parse(STDIN.read)
+
+if datasets.is_a?(Array)
+    datasets.each do |e|
+        STDOUT.write(Net::LDAP::Dataset.new.merge!(e).to_entries.first.to_ldif + "\n")
+    end
+else
+    if datasets.key?('index=0000000000000000')
+        # the "ordered_hash" format
+        sorted_keys=datasets.keys.sort
+        sorted_keys.each do |k|
+            STDOUT.write(Net::LDAP::Dataset.new.merge!(datasets[k]).to_entries.first.to_ldif + "\n")
+        end
+    else
+        datasets.each_pair do |k,v|
+            STDOUT.write(Net::LDAP::Dataset.new.merge!({k=>v}).to_entries.first.to_ldif + "\n")
+        end
+    end
+end
