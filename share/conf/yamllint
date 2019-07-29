@@ -27,7 +27,7 @@ rules:
     max-spaces-after: 1
   comments:
     level: warning
-    require-starting-space: yes
+    require-starting-space: no
     min-spaces-from-content: 2
   comments-indentation: disable
 #    level: warning
